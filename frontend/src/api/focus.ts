@@ -40,12 +40,14 @@ export function tickFocus(input: { durationMinutes?: number; source?: WorkLogSou
   return api.post<Record<string, unknown>>('/api/focus/tick', input).then(camel)
 }
 
-export function finishFocus(input: {
-  durationMinutes?: number
-  source?: WorkLogSource
-  markTaskDone?: boolean
-  taskId?: number | null
-} = {}) {
+export function finishFocus(
+  input: {
+    durationMinutes?: number
+    source?: WorkLogSource
+    markTaskDone?: boolean
+    taskId?: number | null
+  } = {},
+) {
   return api.post<Record<string, unknown>>('/api/focus/finish', input).then(camel)
 }
 

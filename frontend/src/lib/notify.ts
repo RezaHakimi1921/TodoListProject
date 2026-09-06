@@ -1,4 +1,4 @@
-import { DEFAULT_PING_MINUTES } from '../api/settings'
+export const DEFAULT_PING_MINUTES = 10
 
 export function clampPingMinutes(value: number) {
   if (!Number.isFinite(value)) return DEFAULT_PING_MINUTES

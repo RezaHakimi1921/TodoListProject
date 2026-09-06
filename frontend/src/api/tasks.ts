@@ -56,7 +56,7 @@ export function deleteTask(id: number) {
 }
 
 export function getSimilarTasks(title: string) {
-  return api.get<SimilarTask[]>(`/api/tasks/similar?title=${encodeURIComponent(title)}`)
+  return api.get<SimilarTask[]>(`/api/tasks/similar?title=${encodeURIComponent(title)}`).catch(() => [])
 }
 
 export function listTimeline(id: number) {

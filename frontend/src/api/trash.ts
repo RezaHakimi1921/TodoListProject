@@ -11,11 +11,11 @@ export interface TrashItem {
 
 export const TRASH_KIND_LABEL: Record<TrashKind, string> = {
   task: 'کار',
-  timeline: 'Timeline',
-  dailylog: 'یادگرفته',
-  worklog: 'Work Log',
-  problem: 'مسئله',
-  option: 'گزینه',
+  timeline: 'یادداشت تایم‌لاین',
+  dailylog: 'یادداشت روزانه',
+  worklog: 'لاگ کار و زمان',
+  problem: 'مسئله و چالش',
+  option: 'گزینه مسئله',
 }
 
 function camel(row: Record<string, unknown>): TrashItem {

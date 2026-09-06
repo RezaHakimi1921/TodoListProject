@@ -1,165 +1,142 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Clock, Plus, Trash2 } from 'lucide-react'
 import { captureWorkLog, deleteWorkLog, listEntityWorkLogs } from '../api/workLogs'
-import { setFocus } from '../api/focus'
-import { DEFAULT_PING_MINUTES, getSettings } from '../api/settings'
-import { useTrashConfirm } from './ConfirmProvider'
-
-function formatMinutes(total: number) {
-  const hours = Math.floor(total / 60)
-  const rest = total % 60
-  if (hours === 0) return `${rest} دقیقه`
-  return rest === 0 ? `${hours} ساعت` : `${hours} ساعت و ${rest} دقیقه`
-}
-
-function formatWhen(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('fa-IR', { dateStyle: 'short', timeStyle: 'short' }).format(date)
-}
+import { formatPersianDateTime } from '../lib/dates'
 
 interface Props {
-  title: string
-  taskId?: number
-  problemId?: number
+  kind: 'task' | 'problem'
+  id: number
 }
 
-export function EntityWorkLogs({ title, taskId, problemId }: Props) {
+export function EntityWorkLogs({ kind, id }: Props) {
   const queryClient = useQueryClient()
-  const askTrash = useTrashConfirm()
-  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings })
-  const pingMinutes = settingsQuery.data?.pingMinutes ?? DEFAULT_PING_MINUTES
-  const [minutes, setMinutes] = useState<number | null>(null)
-  const [note, setNote] = useState('')
-  const [error, setError] = useState('')
-  const kind = taskId ? 'task' : 'problem'
-  const id = taskId ?? problemId ?? 0
-  const duration = minutes ?? pingMinutes
+  const [minutes, setMinutes] = useState('15')
+  const [desc, setDesc] = useState('')
+  const [showAdd, setShowAdd] = useState(false)
 
-  useEffect(() => {
-    if (minutes === null && settingsQuery.data) setMinutes(settingsQuery.data.pingMinutes)
-  }, [minutes, settingsQuery.data])
-
-  const query = useQuery({
-    queryKey: ['entity-worklogs', kind, id],
+  const logsQuery = useQuery({
+    queryKey: ['worklogs', kind, id],
     queryFn: () => listEntityWorkLogs(kind, id),
-    enabled: id > 0,
+    enabled: Number.isFinite(id),
   })
-
-  const refresh = () => {
-    void queryClient.invalidateQueries({ queryKey: ['entity-worklogs', kind, id] })
-    void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
-    void queryClient.invalidateQueries({ queryKey: ['worklog-summary'] })
-    void queryClient.invalidateQueries({ queryKey: ['focus'] })
-    void queryClient.invalidateQueries({ queryKey: ['trash'] })
-  }
 
   const addMutation = useMutation({
     mutationFn: () =>
       captureWorkLog({
-        description: note.trim() || title,
-        durationMinutes: duration,
+        description: desc.trim() || (kind === 'task' ? 'تمرکز روی کار' : 'بررسی مسئله'),
+        durationMinutes: Math.max(1, Number(minutes) || 15),
         source: 'Manual',
-        taskId,
-        problemId,
+        taskId: kind === 'task' ? id : undefined,
+        problemId: kind === 'problem' ? id : undefined,
       }),
     onSuccess: () => {
-      setNote('')
-      setError('')
-      refresh()
+      setDesc('')
+      setShowAdd(false)
+      void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
+      void queryClient.invalidateQueries({ queryKey: ['worklogs', kind, id] })
     },
-    onError: (err: Error) => setError(err.message),
-  })
-
-  const focusMutation = useMutation({
-    mutationFn: () =>
-      setFocus({
-        description: title,
-        taskId,
-        problemId,
-        durationMinutes: duration,
-        source: 'Manual',
-        log: true,
-      }),
-    onSuccess: refresh,
-    onError: (err: Error) => setError(err.message),
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (entryId: number) => deleteWorkLog(entryId),
-    onSuccess: refresh,
+    mutationFn: (logId: number) => deleteWorkLog(logId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
+      void queryClient.invalidateQueries({ queryKey: ['worklogs', kind, id] })
+    },
   })
 
-  const data = query.data
+  const data = logsQuery.data
+  const totalMinutes = data?.totalMinutes ?? 0
+  const entries = data?.entries ?? []
 
   return (
-    <section className="rounded-[2rem] border border-white/10 bg-ink-900/60 p-5">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <p className="text-xs tracking-[0.2em] text-paper/35">Work Log</p>
-          <h2 className="mt-1 text-lg font-semibold">زمان صرف‌شده روی این مورد</h2>
+    <div className="rounded-2xl border border-[#262f44] bg-[#141824] p-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Clock className="w-4 h-4 text-amber-400" />
+          <h4 className="text-sm font-bold text-slate-200">زمان‌های ثبت‌شده</h4>
+          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
+            {totalMinutes} دقیقه
+          </span>
         </div>
-        <p className="text-sm text-paper/50">{formatMinutes(data?.totalMinutes ?? 0)}</p>
-      </div>
-
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-        <input
-          value={note}
-          onChange={(event) => setNote(event.target.value)}
-          placeholder="چه کردی؟ خالی = عنوان همین مورد"
-          className="flex-1 rounded-2xl border border-white/10 bg-ink-950 px-3 py-2 text-sm"
-        />
-        <input
-          type="number"
-          min={1}
-          max={480}
-          value={duration}
-          onChange={(event) => setMinutes(Number(event.target.value) || pingMinutes)}
-          className="w-24 rounded-2xl border border-white/10 bg-ink-950 px-3 py-2 text-sm"
-        />
         <button
           type="button"
-          onClick={() => addMutation.mutate()}
-          className="rounded-2xl bg-ember px-4 py-2 text-sm font-semibold text-ink-950"
+          onClick={() => setShowAdd((v) => !v)}
+          className="text-xs flex items-center gap-1 text-slate-400 hover:text-amber-300 transition-colors"
         >
-          ثبت زمان
+          <Plus className="w-3.5 h-3.5" />
+          {showAdd ? 'بستن فرم' : 'ثبت دستی زمان'}
         </button>
       </div>
-      <button
-        type="button"
-        onClick={() => focusMutation.mutate()}
-        className="mt-2 text-sm text-ember"
-      >
-        این را کار فعلی کن — نوتیف بعدی روی همین می‌آید
-      </button>
-      {error && <p className="mt-2 text-sm text-rose-300">{error}</p>}
 
-      <div className="mt-4 space-y-2">
-        {(data?.entries ?? []).map((entry) => (
-          <div key={entry.id} className="flex items-center justify-between gap-3 rounded-2xl bg-ink-800 px-3 py-2 text-sm">
-            <div>
-              <p>{entry.description}</p>
-              <p className="text-xs text-paper/40">
-                {formatWhen(entry.createdAt)} · {entry.durationMinutes} دقیقه
-              </p>
+      {showAdd && (
+        <div className="mt-3 p-3 rounded-xl bg-[#1a2030] border border-slate-700/60 space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              placeholder="توضیح کوتاه فعالیت (اختیاری)..."
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+              className="flex-1 rounded-lg bg-[#10131d] border border-slate-700 px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+            />
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min="1"
+                max="480"
+                value={minutes}
+                onChange={(e) => setMinutes(e.target.value)}
+                className="w-16 rounded-lg bg-[#10131d] border border-slate-700 px-2 py-1.5 text-xs text-slate-200 text-center focus:outline-none focus:border-amber-500"
+              />
+              <span className="text-xs text-slate-400">دقیقه</span>
             </div>
+          </div>
+          <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => {
-                void askTrash('این ثبت Work Log').then((ok) => {
-                  if (ok) deleteMutation.mutate(entry.id)
-                })
-              }}
-              className="shrink-0 text-xs text-rose-200"
+              onClick={() => setShowAdd(false)}
+              className="px-3 py-1 text-xs text-slate-400 hover:text-slate-200"
             >
-              حذف
+              انصراف
+            </button>
+            <button
+              type="button"
+              disabled={addMutation.isPending}
+              onClick={() => addMutation.mutate()}
+              className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors"
+            >
+              {addMutation.isPending ? 'در حال ثبت...' : 'افزودن'}
             </button>
           </div>
-        ))}
-        {(data?.entries ?? []).length === 0 && (
-          <p className="text-sm text-paper/35">هنوز زمانی روی این مورد ثبت نشده.</p>
+        </div>
+      )}
+
+      <div className="mt-3 divide-y divide-slate-800/60">
+        {entries.length === 0 ? (
+          <p className="py-2 text-center text-xs text-slate-500">هنوز زمانی برای این مورد ثبت نشده است.</p>
+        ) : (
+          entries.map((entry) => (
+            <div key={entry.id} className="py-2 flex items-center justify-between text-xs">
+              <div>
+                <span className="text-slate-200 font-medium">{entry.description}</span>
+                <span className="text-slate-500 text-[11px] mr-2">({formatPersianDateTime(entry.createdAt)})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-amber-300 font-semibold">{entry.durationMinutes}m</span>
+                <button
+                  type="button"
+                  onClick={() => deleteMutation.mutate(entry.id)}
+                  className="text-slate-500 hover:text-rose-400 p-1 transition-colors"
+                  title="حذف لاگ"
+                >
+                  <Trash2 className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+          ))
         )}
       </div>
-    </section>
+    </div>
   )
 }
