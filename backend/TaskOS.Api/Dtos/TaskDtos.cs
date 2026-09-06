@@ -13,6 +13,8 @@ public sealed class TaskDto
     public string CreatedAt { get; set; } = string.Empty;
     public string UpdatedAt { get; set; } = string.Empty;
     public string? DoneAt { get; set; }
+    public int ChecklistTotal { get; set; }
+    public int ChecklistDone { get; set; }
 }
 
 public sealed class CreateTaskRequest

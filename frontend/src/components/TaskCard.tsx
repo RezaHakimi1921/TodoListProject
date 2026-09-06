@@ -226,6 +226,12 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
             {task.title}
           </h3>
 
+          {(task.checklistTotal ?? 0) > 0 && (
+            <p className="mt-1.5 text-[11px] text-slate-400">
+              {task.checklistDone ?? 0} از {task.checklistTotal} انجام شد
+            </p>
+          )}
+
           {/* Stuck Reason Callout */}
           {isStuck && task.stuckReason && (
             <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-500/[0.08] border border-rose-500/20 px-2.5 py-1 text-xs text-rose-300/90">

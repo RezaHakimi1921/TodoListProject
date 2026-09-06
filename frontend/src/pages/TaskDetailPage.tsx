@@ -23,6 +23,7 @@ import {
 } from '../api/tasks'
 import { useTrashConfirm } from '../components/ConfirmProvider'
 import { EntityWorkLogs } from '../components/EntityWorkLogs'
+import { TaskChecklist } from '../components/TaskChecklist'
 import { STATUS_LABEL, STUCK_REASONS, type EnergyType, type TaskStatus } from '../types'
 import { formatPersianDateTime } from '../lib/dates'
 
@@ -247,6 +248,8 @@ export function TaskDetailPage() {
           </button>
         </div>
       </div>
+
+      <TaskChecklist taskId={taskId} />
 
       {/* Entity Work Logs */}
       <EntityWorkLogs kind="task" id={taskId} />

@@ -68,7 +68,10 @@ export function WorkLogPage() {
   })
 
   const summary = summaryQuery.data
-  const logs = logsQuery.data ?? []
+  const logs = [...(logsQuery.data ?? [])].sort((a, b) => {
+    const byTime = String(b.createdAt).localeCompare(String(a.createdAt))
+    return byTime !== 0 ? byTime : b.id - a.id
+  })
   const tasks = tasksQuery.data ?? []
 
   const totalMinutes = summary?.totalMinutes ?? logs.reduce((s, l) => s + l.durationMinutes, 0)

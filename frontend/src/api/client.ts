@@ -13,13 +13,16 @@ export class ApiError extends Error {
 let backendAvailable: boolean | null = null
 
 async function checkBackend(): Promise<boolean> {
-  if (backendAvailable !== null) return backendAvailable
+  if (backendAvailable === true) return true
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 600)
-    const res = await fetch('/api/settings', { signal: controller.signal })
+    const timeout = setTimeout(() => controller.abort(), 4000)
+    let res = await fetch('/api/health', { signal: controller.signal })
+    if (res.status === 404) {
+      res = await fetch('/api/settings', { signal: controller.signal })
+    }
     clearTimeout(timeout)
-    backendAvailable = res.ok || res.status === 200
+    backendAvailable = res.ok
     return backendAvailable
   } catch {
     backendAvailable = false
@@ -28,6 +31,7 @@ async function checkBackend(): Promise<boolean> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const isPingTest = path.includes('/api/settings/test-toast')
   const isAvailable = await checkBackend()
   if (isAvailable) {
     try {
@@ -49,12 +53,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       return data as T
     } catch (err) {
       if (err instanceof ApiError) throw err
-      // Fallback to local store if network fails
+      if (isPingTest) {
+        throw new ApiError('فرم ویندوز ارسال نشد. API را روی پورت 5088 چک کن.', 503)
+      }
     }
   }
 
-  // Local storage mock fallback
-  return handleLocalMock<T>(path, init)
+  throw new ApiError('API در دسترس نیست. TaskOS.Api را با آدرس http://127.0.0.1:5088 اجرا کن.', 503)
 }
 
 function handleLocalMock<T>(path: string, init?: RequestInit): T {
@@ -245,6 +250,64 @@ function handleLocalMock<T>(path: string, init?: RequestInit): T {
     store.timeline = store.timeline.filter((t) => t.id !== entryId)
     saveStore(store)
     return undefined as T
+  }
+
+  const checklistMatch = pathname.match(/^\/api\/tasks\/(\d+)\/checklist$/)
+  if (checklistMatch) {
+    const taskId = Number(checklistMatch[1])
+    store.checklistItems ??= []
+    if (method === 'GET') {
+      return store.checklistItems
+        .filter((item) => item.taskId === taskId)
+        .sort((a, b) => a.sortOrder - b.sortOrder || a.id - b.id) as unknown as T
+    }
+    if (method === 'POST') {
+      const title = String(body?.title ?? '').trim()
+      if (!title) throw new ApiError('Title is required.', 400)
+      const nextId = store.checklistItems.reduce((m, item) => Math.max(m, item.id), 0) + 1
+      const sortOrder = store.checklistItems
+        .filter((item) => item.taskId === taskId)
+        .reduce((m, item) => Math.max(m, item.sortOrder), -1) + 1
+      const item = {
+        id: nextId,
+        taskId,
+        title,
+        isDone: false,
+        sortOrder,
+        createdAt: new Date().toISOString(),
+        doneAt: null as string | null,
+      }
+      store.checklistItems.push(item)
+      saveStore(store)
+      return item as unknown as T
+    }
+  }
+
+  const checklistItemMatch = pathname.match(/^\/api\/tasks\/(\d+)\/checklist\/(\d+)$/)
+  if (checklistItemMatch) {
+    const taskId = Number(checklistItemMatch[1])
+    const itemId = Number(checklistItemMatch[2])
+    store.checklistItems ??= []
+    const idx = store.checklistItems.findIndex((item) => item.taskId === taskId && item.id === itemId)
+    if (idx === -1) throw new ApiError('Step not found.', 404)
+    if (method === 'PUT') {
+      const current = store.checklistItems[idx]
+      const isDone = body?.isDone ?? current.isDone
+      store.checklistItems[idx] = {
+        ...current,
+        title: body?.title?.trim() || current.title,
+        isDone,
+        sortOrder: body?.sortOrder ?? current.sortOrder,
+        doneAt: isDone ? current.doneAt ?? new Date().toISOString() : null,
+      }
+      saveStore(store)
+      return store.checklistItems[idx] as unknown as T
+    }
+    if (method === 'DELETE') {
+      store.checklistItems.splice(idx, 1)
+      saveStore(store)
+      return undefined as T
+    }
   }
 
   // WorkLogs API

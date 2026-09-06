@@ -13,6 +13,24 @@ CREATE TABLE IF NOT EXISTS Task (
     DeletedAt TEXT NULL
 );
 
+CREATE TABLE IF NOT EXISTS TaskJira (
+    TaskId INTEGER PRIMARY KEY REFERENCES Task(Id) ON DELETE CASCADE,
+    JiraKey TEXT NOT NULL UNIQUE,
+    JiraUrl TEXT NULL,
+    OpenCount INTEGER NOT NULL DEFAULT 0,
+    LastSeenAt TEXT NULL
+);
+
+CREATE TABLE IF NOT EXISTS TaskChecklistItem (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    TaskId INTEGER NOT NULL REFERENCES Task(Id) ON DELETE CASCADE,
+    Title TEXT NOT NULL,
+    IsDone INTEGER NOT NULL DEFAULT 0,
+    SortOrder INTEGER NOT NULL DEFAULT 0,
+    CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+    DoneAt TEXT NULL
+);
+
 CREATE TABLE IF NOT EXISTS TaskTimelineEntry (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     TaskId INTEGER NOT NULL REFERENCES Task(Id) ON DELETE CASCADE,
@@ -33,7 +51,7 @@ CREATE TABLE IF NOT EXISTS WorkLogEntry (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     Description TEXT NOT NULL,
     DurationMinutes INTEGER NOT NULL DEFAULT 15,
-    Source TEXT NOT NULL CHECK (Source IN ('Timer','Extension','Manual')) DEFAULT 'Manual',
+    Source TEXT NOT NULL CHECK (Source IN ('Timer','Extension','Manual','Break')) DEFAULT 'Manual',
     TaskId INTEGER NULL,
     ProblemId INTEGER NULL,
     CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
@@ -57,8 +75,8 @@ CREATE TABLE IF NOT EXISTS ProblemOption (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     ProblemId INTEGER NOT NULL REFERENCES Problem(Id) ON DELETE CASCADE,
     Title TEXT NOT NULL,
-    JuniorExplain TEXT NULL,
     SortOrder INTEGER NOT NULL DEFAULT 0,
+    JuniorExplain TEXT NULL,
     CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
     DeletedAt TEXT NULL
 );
@@ -87,3 +105,5 @@ CREATE INDEX IF NOT EXISTS IX_WorkLogEntry_TaskId ON WorkLogEntry(TaskId);
 CREATE INDEX IF NOT EXISTS IX_WorkLogEntry_ProblemId ON WorkLogEntry(ProblemId);
 CREATE INDEX IF NOT EXISTS IX_Problem_Status ON Problem(Status);
 CREATE INDEX IF NOT EXISTS IX_ProblemOption_ProblemId ON ProblemOption(ProblemId);
+CREATE INDEX IF NOT EXISTS IX_TaskChecklistItem_TaskId ON TaskChecklistItem(TaskId);
+CREATE INDEX IF NOT EXISTS IX_TaskJira_JiraKey ON TaskJira(JiraKey);

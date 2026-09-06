@@ -53,6 +53,16 @@
   </head>
   <body>
     <p id="sourceLabel" style="opacity: 0.6; font-size: 12px">Extension</p>
+    <div id="jiraBox" hidden>
+      <h3 style="margin: 4px 0 8px">تکت Jira</h3>
+      <div id="jiraTicket" class="current"></div>
+      <div id="jiraFocus" class="current" hidden></div>
+      <button id="jiraStart" class="save">شروع این تکت</button>
+      <div class="row" style="margin-top: 8px">
+        <button id="jiraKeep" class="ghost">هنوز کار قبلی</button>
+        <button id="jiraLater" class="ghost">بعداً</button>
+      </div>
+    </div>
     <div id="choose">
       <h3 style="margin: 4px 0 8px">هنوز همین کار؟</h3>
       <div id="currentBox" class="current"></div>
@@ -67,8 +77,12 @@
     </div>
     <div id="form" hidden>
       <h3 id="formTitle" style="margin: 4px 0 8px">چیکار می‌کنی؟</h3>
-      <input id="description" placeholder="جستجو یا کار جدید" />
+      <input id="description" placeholder="جستجو یا عنوان جدید" />
       <div id="picks"></div>
+      <div class="row">
+        <button id="addTask" class="save" style="width: auto">کار جدید</button>
+        <button id="addProblem" class="ghost">مسئله جدید</button>
+      </div>
       <div class="row">
         <input id="minutes" type="number" value="10" min="1" max="480" style="width: 90px" />
         <button id="save" class="save" style="width: auto">شروع با متن جدید</button>

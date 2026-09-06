@@ -33,7 +33,7 @@ public sealed class WorkLogRepository : IWorkLogRepository
             SELECT {Columns}
             FROM WorkLogEntry
             WHERE date(CreatedAt) = @LogDate AND DeletedAt IS NULL
-            ORDER BY CreatedAt ASC, Id ASC
+            ORDER BY CreatedAt DESC, Id DESC
             """;
         using var connection = _factory.Create();
         var rows = await connection.QueryAsync<WorkLogEntry>(sql, new { LogDate = logDate });

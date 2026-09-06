@@ -1,12 +1,20 @@
 {
   "manifest_version": 3,
   "name": "TaskOS Work Log",
-  "version": "0.3.0",
-  "description": "ثبت سریع Work Log از آیکون کروم. زمان‌بندی نوتیف را API انجام می‌دهد.",
-  "permissions": ["alarms", "storage", "notifications"],
+  "version": "0.5.1",
+  "description": "Work Log و فرم ویندوز وقتی آدرس Jira شامل کلید تکت باشد.",
+  "permissions": ["alarms", "storage", "notifications", "tabs", "webNavigation"],
   "host_permissions": [
+    "http://127.0.0.1:5088/*",
     "http://localhost:5088/*",
-    "http://127.0.0.1:5088/*"
+    "https://jira.smartx.ir/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://jira.smartx.ir/*"],
+      "js": ["jira-watch.js"],
+      "run_at": "document_idle"
+    }
   ],
   "action": {
     "default_title": "TaskOS Log",

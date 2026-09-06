@@ -13,7 +13,7 @@ public sealed class TaskRepository : ITaskRepository
         _factory = factory;
     }
 
-    public async Task<IReadOnlyList<TaskRecord>> ListAsync(string? status, string? energyType, string? tag)
+    public async Task<IReadOnlyList<TaskRecord>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null)
     {
         var sql = """
             SELECT Id, Title, Status, EnergyType, Tags, StuckReason, CreatedAt, UpdatedAt, DoneAt
@@ -22,6 +22,13 @@ public sealed class TaskRepository : ITaskRepository
               AND (@Status IS NULL OR Status = @Status)
               AND (@EnergyType IS NULL OR EnergyType = @EnergyType)
               AND (@Tag IS NULL OR (',' || IFNULL(Tags, '') || ',') LIKE '%,' || @Tag || ',%')
+              AND (@Q IS NULL OR Title LIKE '%' || @Q || '%' OR IFNULL(Tags, '') LIKE '%' || @Q || '%')
+              AND (
+                    @Date IS NULL
+                    OR @Q IS NOT NULL
+                    OR Status != 'Done'
+                    OR date(DoneAt) = @Date
+                  )
             ORDER BY
                 CASE Status WHEN 'Doing' THEN 0 WHEN 'Open' THEN 1 WHEN 'Stuck' THEN 2 ELSE 3 END,
                 UpdatedAt DESC
@@ -32,7 +39,9 @@ public sealed class TaskRepository : ITaskRepository
         {
             Status = string.IsNullOrWhiteSpace(status) ? null : status,
             EnergyType = string.IsNullOrWhiteSpace(energyType) ? null : energyType,
-            Tag = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim()
+            Tag = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim(),
+            Date = string.IsNullOrWhiteSpace(date) ? null : date,
+            Q = string.IsNullOrWhiteSpace(q) ? null : q.Trim()
         });
         return rows.ToList();
     }

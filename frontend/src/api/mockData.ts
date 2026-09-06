@@ -8,16 +8,26 @@ export interface MockStore {
   dailyLogs: DailyLog[]
   trash: { kind: string; id: number; title: string; deletedAt: string; data: unknown }[]
   timeline: { id: number; taskId: number; note: string; createdAt: string }[]
+  checklistItems: {
+    id: number
+    taskId: number
+    title: string
+    isDone: boolean
+    sortOrder: number
+    createdAt: string
+    doneAt: string | null
+  }[]
   settings: { pingMinutes: number; paused: boolean; lastPingAt: string | null }
   focus: { active: boolean; description: string; taskId: number | null; problemId: number | null; startedAt: string | null; updatedAt: string | null }
 }
 
-const STORAGE_KEY = 'taskos_data_v2'
+const STORAGE_KEY = 'taskos_data_v3'
 
 export function getInitialMockStore(): MockStore {
   const today = todayIso()
   return {
-    tasks: [
+    tasks: [] as TaskItem[],
+    _removedDemoTasks: [
       {
         id: 1,
         title: 'طراحی ماژول گزارش‌گیری و صدور لاگ‌های فشرده برای جیرا',
@@ -160,6 +170,7 @@ export function getInitialMockStore(): MockStore {
       },
     ],
     trash: [],
+    checklistItems: [],
     timeline: [
       {
         id: 1,

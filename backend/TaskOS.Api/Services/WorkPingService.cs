@@ -53,7 +53,6 @@ public sealed class WorkPingService : IWorkPingService
             var body = focus.Active && !string.IsNullOrWhiteSpace(focus.Description)
                 ? focus.Description
                 : $"{settings.PingMinutes} دقیقه گذشت.";
-            var url = _configuration["TaskOS:FrontendUrl"] ?? "http://127.0.0.1:5173";
             var items = await LoadPicksAsync(focus);
 
             WorkPingResult result;
@@ -64,7 +63,7 @@ public sealed class WorkPingService : IWorkPingService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Center form failed; falling back to toast");
-                try { WindowsToast.Show("TaskOS", body, url); }
+                try { WindowsToast.Show("TaskOS", body); }
                 catch (Exception toastEx) { _logger.LogWarning(toastEx, "Windows toast failed"); return false; }
                 return true;
             }
@@ -75,7 +74,16 @@ public sealed class WorkPingService : IWorkPingService
                 return true;
             }
 
-            await ApplyAsync(result, settings);
+            try
+            {
+                await ApplyAsync(result, settings);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Work ping apply failed for {Choice} / {Title}", result.Choice, result.Work?.Title);
+                throw;
+            }
+
             _logger.LogInformation("Work ping closed with {Choice}", result.Choice);
             return true;
         }
@@ -85,12 +93,119 @@ public sealed class WorkPingService : IWorkPingService
         }
     }
 
-    private WorkPickItem? CreateTaskSync(string title)
+    public void QueueJiraPrompt(JiraSeenDto seen)
+    {
+        if (string.IsNullOrWhiteSpace(seen.JiraKey))
+        {
+            return;
+        }
+
+        var factory = _scopes;
+        var logger = _logger;
+        _ = Task.Run(() =>
+        {
+            if (Interlocked.CompareExchange(ref _open, 1, 0) != 0)
+            {
+                logger.LogInformation("Jira form skipped; another TaskOS form is already open");
+                return;
+            }
+
+            try
+            {
+                using var scope = factory.CreateScope();
+                var ping = (WorkPingService)scope.ServiceProvider.GetRequiredService<IWorkPingService>();
+                ping.ShowJiraForm(seen);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Jira Windows form failed");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _open, 0);
+            }
+        });
+    }
+
+    private void ShowJiraForm(JiraSeenDto seen)
+    {
+        using var scope = _scopes.CreateScope();
+        var settings = scope.ServiceProvider.GetRequiredService<ISettingsService>().GetAsync().GetAwaiter().GetResult();
+        var focus = seen.CurrentFocus;
+        var isNewLink = focus?.Active == true
+            && !string.Equals(focus.JiraKey, seen.JiraKey, StringComparison.OrdinalIgnoreCase);
+        var heading = isNewLink
+            ? "لینک جدید باز شد"
+            : seen.Decision switch
+            {
+                "ask-create" => "تکت جدید Jira",
+                "ask-start" => "شروع تکت Jira",
+                "continue" => "تکت Jira در آدرس",
+                _ => "کار قبلی تمام شد؟"
+            };
+        var ticketTitle = string.IsNullOrWhiteSpace(seen.Title) || seen.Title == seen.JiraKey
+            ? seen.JiraKey
+            : $"{seen.JiraKey} {seen.Title}";
+        var body = isNewLink
+            ? $"کار قبلی: {focus!.Description}{Environment.NewLine}کار جدید: {ticketTitle}{Environment.NewLine}یکی را انتخاب کن: ادامه کار قبلی، یا ادامه با کار جدید."
+            : focus?.Active == true
+                ? $"الان: {focus.Description}{Environment.NewLine}تکت: {ticketTitle}"
+                : $"تکت: {ticketTitle}";
+
+        var items = LoadPicksAsync(new WorkFocusDto
+        {
+            Active = focus?.Active ?? false,
+            Description = focus?.Description ?? "",
+            TaskId = focus?.TaskId
+        }).GetAwaiter().GetResult();
+
+        if (isNewLink)
+        {
+            foreach (var item in items.Where(row => row.Kind == "current").ToList())
+            {
+                items.Remove(item);
+                items.Insert(0, new WorkPickItem
+                {
+                    Kind = item.Kind,
+                    Id = item.Id,
+                    Title = item.Title,
+                    Meta = "ادامه کار قبلی"
+                });
+            }
+        }
+
+        items.Insert(0, new WorkPickItem
+        {
+            Kind = "jira",
+            Title = ticketTitle,
+            Meta = isNewLink ? "ادامه با کار جدید" : "شروع این تکت",
+            JiraKey = seen.JiraKey,
+            JiraUrl = seen.JiraUrl,
+            Id = seen.MatchedTask?.Id
+        });
+
+        var result = WorkPingForm.ShowCentered(heading, body, settings.PingMinutes, items, CreateTaskSync, CreateProblemSync);
+        if (result.Choice == WorkPingChoice.Dismissed)
+        {
+            return;
+        }
+
+        ApplyAsync(result, settings).GetAwaiter().GetResult();
+    }
+
+    private WorkPickItem? CreateTaskSync(string title, string energy)
     {
         using var scope = _scopes.CreateScope();
         var tasks = scope.ServiceProvider.GetRequiredService<ITaskService>();
-        var created = tasks.CreateTaskAsync(new CreateTaskRequest { Title = title, EnergyType = "Light" }).GetAwaiter().GetResult();
-        return new WorkPickItem { Kind = "task", Id = created.Id, Title = created.Title, Meta = "باز" };
+        var energyType = string.Equals(energy, "Deep", StringComparison.OrdinalIgnoreCase) ? "Deep" : "Light";
+        var created = tasks.CreateTaskAsync(new CreateTaskRequest { Title = title, EnergyType = energyType }).GetAwaiter().GetResult();
+        return new WorkPickItem
+        {
+            Kind = "task",
+            Id = created.Id,
+            Title = created.Title,
+            Meta = energyType == "Deep" ? "تمرکز عمیق" : "کار عادی"
+        };
     }
 
     private WorkPickItem? CreateProblemSync(string title)
@@ -138,9 +253,26 @@ public sealed class WorkPingService : IWorkPingService
         switch (result.Choice)
         {
             case WorkPingChoice.Submit when result.Work is { } work && result.Minutes > 0:
+                if (work.Kind == "jira" && !string.IsNullOrWhiteSpace(work.JiraKey))
+                {
+                    using var scope = _scopes.CreateScope();
+                    var jira = scope.ServiceProvider.GetRequiredService<IJiraLinkService>();
+                    await jira.StartAsync(new JiraStartRequest
+                    {
+                        JiraKey = work.JiraKey,
+                        JiraUrl = work.JiraUrl,
+                        Title = work.Title,
+                        FinishPrevious = true,
+                        DurationMinutes = result.Minutes,
+                        EnergyType = result.EnergyType
+                    });
+                    break;
+                }
+
                 if (work.Kind == "current")
                 {
                     await _focus.TickAsync(new FocusActionRequest { DurationMinutes = result.Minutes, Source = "Timer" });
+                    await ApplyEnergyAsync(work.Id, result.EnergyType);
                     break;
                 }
 
@@ -153,6 +285,10 @@ public sealed class WorkPingService : IWorkPingService
                     Source = "Timer",
                     Log = true
                 });
+                if (work.Kind == "task")
+                {
+                    await ApplyEnergyAsync(work.Id, result.EnergyType);
+                }
                 break;
             case WorkPingChoice.Break when result.Work is { } rest && result.Minutes > 0:
                 await _workLogs.CaptureAsync(new CaptureWorkLogRequest
@@ -166,6 +302,29 @@ public sealed class WorkPingService : IWorkPingService
                 await _settings.UpdateAsync(new AppSettingsDto { PingMinutes = settings.PingMinutes, Paused = true });
                 break;
         }
+    }
+
+    private async Task ApplyEnergyAsync(int? taskId, string? energy)
+    {
+        if (taskId is not int id || string.IsNullOrWhiteSpace(energy))
+        {
+            return;
+        }
+
+        var energyType = string.Equals(energy, "Deep", StringComparison.OrdinalIgnoreCase) ? "Deep" : "Light";
+        var task = await _tasks.GetAsync(id);
+        if (task is null || string.Equals(task.EnergyType, energyType, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        await _tasks.UpdateAsync(id, new UpdateTaskRequest
+        {
+            Title = task.Title,
+            Status = task.Status,
+            EnergyType = energyType,
+            TagList = task.Tags
+        });
     }
 
     private static string StatusFa(string status) => status switch

@@ -44,8 +44,12 @@ export function DashboardPage() {
   const isYesterday = selectedDate === yesterday
 
   const tasksQuery = useQuery({
-    queryKey: ['tasks', selectedDate],
-    queryFn: () => listTasks({ date: selectedDate === 'all' ? undefined : selectedDate }),
+    queryKey: ['tasks', selectedDate, searchQuery],
+    queryFn: () =>
+      listTasks({
+        date: selectedDate === 'all' ? undefined : selectedDate,
+        q: searchQuery.trim() || undefined,
+      }),
   })
 
   const agingMutation = useMutation({

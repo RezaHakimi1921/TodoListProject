@@ -10,11 +10,7 @@ public static class WindowsToast
             .AddText(title)
             .AddText(body);
 
-        if (!string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out var uri))
-        {
-            builder.SetProtocolActivation(uri);
-        }
-
+        _ = url;
         builder.Show();
     }
 }

@@ -129,8 +129,19 @@ export function SettingsPage() {
               onClick={() => toastMutation.mutate()}
               className="px-4 py-2 rounded-xl bg-[#1a2030] hover:bg-[#232b40] text-slate-300 border border-slate-700 text-xs font-medium transition-colors"
             >
-              {toastSent ? 'ارسال شد!' : 'تست اعلان Toast ویندوز'}
+              {toastMutation.isPending
+                ? 'در حال باز شدن فرم...'
+                : toastSent
+                  ? 'ارسال شد!'
+                  : 'تست اعلان Toast ویندوز'}
             </button>
+            {toastMutation.isError && (
+              <p className="text-[11px] text-rose-400">
+                {toastMutation.error instanceof Error
+                  ? toastMutation.error.message
+                  : 'تست فرم ویندوز ناموفق بود.'}
+              </p>
+            )}
 
             <button
               type="button"

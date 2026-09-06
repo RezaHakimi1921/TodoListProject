@@ -8,26 +8,33 @@ namespace TaskOS.Api.Services;
 public sealed class TaskService : ITaskService
 {
     private readonly ITaskRepository _tasks;
+    private readonly ITaskChecklistService _checklist;
     private readonly int _agingDays;
     private readonly double _similarityThreshold;
 
-    public TaskService(ITaskRepository tasks, IConfiguration configuration)
+    public TaskService(ITaskRepository tasks, ITaskChecklistService checklist, IConfiguration configuration)
     {
         _tasks = tasks;
+        _checklist = checklist;
         _agingDays = configuration.GetValue("TaskOS:AgingDays", 3);
         _similarityThreshold = configuration.GetValue("TaskOS:SimilarityThreshold", 0.6);
     }
 
-    public async Task<IReadOnlyList<TaskDto>> ListAsync(string? status, string? energyType, string? tag)
+    public async Task<IReadOnlyList<TaskDto>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null)
     {
-        var rows = await _tasks.ListAsync(status, energyType, tag);
-        return rows.Select(r => TaskMapping.ToDto(r, _agingDays)).ToList();
+        var rows = await _tasks.ListAsync(status, energyType, tag, date, q);
+        var dtos = rows.Select(r => TaskMapping.ToDto(r, _agingDays)).ToList();
+        await _checklist.AttachCountsAsync(dtos);
+        return dtos;
     }
 
     public async Task<TaskDto?> GetAsync(int id)
     {
         var row = await _tasks.GetByIdAsync(id);
-        return row is null ? null : TaskMapping.ToDto(row, _agingDays);
+        if (row is null) return null;
+        var dto = TaskMapping.ToDto(row, _agingDays);
+        await _checklist.AttachCountsAsync([dto]);
+        return dto;
     }
 
     public async Task<TaskDto> CreateTaskAsync(CreateTaskRequest request)

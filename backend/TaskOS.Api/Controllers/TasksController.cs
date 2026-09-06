@@ -9,11 +9,13 @@ namespace TaskOS.Api.Controllers;
 public sealed class TasksController : ControllerBase
 {
     private readonly ITaskService _tasks;
+    private readonly ITaskChecklistService _checklist;
     private readonly ITrashService _trash;
 
-    public TasksController(ITaskService tasks, ITrashService trash)
+    public TasksController(ITaskService tasks, ITaskChecklistService checklist, ITrashService trash)
     {
         _tasks = tasks;
+        _checklist = checklist;
         _trash = trash;
     }
 
@@ -21,9 +23,11 @@ public sealed class TasksController : ControllerBase
     public async Task<ActionResult<IReadOnlyList<TaskDto>>> List(
         [FromQuery] string? status,
         [FromQuery] string? energyType,
-        [FromQuery] string? tag)
+        [FromQuery] string? tag,
+        [FromQuery] string? date,
+        [FromQuery] string? q)
     {
-        return Ok(await _tasks.ListAsync(status, energyType, tag));
+        return Ok(await _tasks.ListAsync(status, energyType, tag, date, q));
     }
 
     [HttpGet("similar")]
@@ -135,5 +139,55 @@ public sealed class TasksController : ControllerBase
         {
             return NotFound();
         }
+    }
+
+    [HttpGet("{taskId:int}/checklist")]
+    public async Task<IActionResult> ListChecklist(int taskId)
+    {
+        try
+        {
+            return Ok(await _checklist.ListAsync(taskId));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
+
+    [HttpPost("{taskId:int}/checklist")]
+    public async Task<IActionResult> AddChecklist(int taskId, [FromBody] CreateChecklistItemRequest request)
+    {
+        try
+        {
+            return Ok(await _checklist.AddAsync(taskId, request ?? new CreateChecklistItemRequest()));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPut("{taskId:int}/checklist/{itemId:int}")]
+    public async Task<IActionResult> UpdateChecklist(int taskId, int itemId, [FromBody] UpdateChecklistItemRequest request)
+    {
+        try
+        {
+            var updated = await _checklist.UpdateAsync(taskId, itemId, request ?? new UpdateChecklistItemRequest());
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpDelete("{taskId:int}/checklist/{itemId:int}")]
+    public async Task<IActionResult> DeleteChecklist(int taskId, int itemId)
+    {
+        return await _checklist.DeleteAsync(taskId, itemId) ? NoContent() : NotFound();
     }
 }

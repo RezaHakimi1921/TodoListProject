@@ -34,7 +34,7 @@ public sealed class WorkLogService : IWorkLogService
         var source = string.IsNullOrWhiteSpace(request.Source) ? WorkLogSources.Manual : request.Source.Trim();
         if (!WorkLogSources.All.Contains(source))
         {
-            throw new ArgumentException("Source must be Timer, Extension, or Manual.");
+            throw new ArgumentException("Source must be Timer, Extension, Manual, or Break.");
         }
 
         var created = await _logs.CreateAsync(new WorkLogEntry

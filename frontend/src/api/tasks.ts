@@ -16,6 +16,8 @@ const camel = (row: Record<string, unknown>): TaskItem => ({
   targetDate: (row.targetDate as string | null) ?? null,
   rolledOver: Boolean(row.rolledOver),
   rolledOverFrom: (row.rolledOverFrom as string | null) ?? null,
+  checklistTotal: Number(row.checklistTotal ?? 0),
+  checklistDone: Number(row.checklistDone ?? 0),
 })
 
 export interface TaskFilters {
@@ -23,6 +25,7 @@ export interface TaskFilters {
   energyType?: string
   tag?: string
   date?: string
+  q?: string
 }
 
 export function listTasks(filters: TaskFilters = {}) {
@@ -31,6 +34,7 @@ export function listTasks(filters: TaskFilters = {}) {
   if (filters.energyType) params.set('energyType', filters.energyType)
   if (filters.tag) params.set('tag', filters.tag)
   if (filters.date) params.set('date', filters.date)
+  if (filters.q) params.set('q', filters.q)
   const query = params.toString()
   return api.get<Record<string, unknown>[]>(`/api/tasks${query ? `?${query}` : ''}`).then((rows) =>
     rows.map(camel),

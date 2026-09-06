@@ -47,6 +47,9 @@ public sealed class DatabaseInitializer
             EnsureColumn(connection, table, column, type);
         }
 
+        EnsureWorkLogAllowsBreak(connection);
+        EnsureTaskJira(connection);
+
         if (!string.IsNullOrWhiteSpace(indexSql))
         {
             Execute(connection, indexSql);
@@ -80,5 +83,53 @@ public sealed class DatabaseInitializer
         using var alter = connection.CreateCommand();
         alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {type}";
         alter.ExecuteNonQuery();
+    }
+
+    private static void EnsureWorkLogAllowsBreak(SqliteConnection connection)
+    {
+        using var lookup = connection.CreateCommand();
+        lookup.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'WorkLogEntry'";
+        var sql = lookup.ExecuteScalar() as string ?? string.Empty;
+        if (sql.Contains("'Break'", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Execute(connection, """
+            CREATE TABLE WorkLogEntry_mig (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Description TEXT NOT NULL,
+                DurationMinutes INTEGER NOT NULL DEFAULT 15,
+                Source TEXT NOT NULL CHECK (Source IN ('Timer','Extension','Manual','Break')) DEFAULT 'Manual',
+                TaskId INTEGER NULL,
+                ProblemId INTEGER NULL,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                DeletedAt TEXT NULL
+            );
+            INSERT INTO WorkLogEntry_mig (Id, Description, DurationMinutes, Source, TaskId, ProblemId, CreatedAt, DeletedAt)
+            SELECT Id, Description, DurationMinutes, Source, TaskId, ProblemId, CreatedAt, DeletedAt FROM WorkLogEntry;
+            DROP TABLE WorkLogEntry;
+            ALTER TABLE WorkLogEntry_mig RENAME TO WorkLogEntry;
+            """);
+    }
+
+    private static void EnsureTaskJira(SqliteConnection connection)
+    {
+        using var lookup = connection.CreateCommand();
+        lookup.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'TaskJira'";
+        if (lookup.ExecuteScalar() is string)
+        {
+            return;
+        }
+
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS TaskJira (
+                TaskId INTEGER PRIMARY KEY REFERENCES Task(Id) ON DELETE CASCADE,
+                JiraKey TEXT NOT NULL UNIQUE,
+                JiraUrl TEXT NULL,
+                OpenCount INTEGER NOT NULL DEFAULT 0,
+                LastSeenAt TEXT NULL
+            );
+            """);
     }
 }

@@ -1,171 +1,620 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle, Clock, Pause, Play, Square, Zap } from 'lucide-react'
-import { finishFocus, getFocus, clearFocus } from '../api/focus'
-import { ackPing, getSettings } from '../api/settings'
-import { isPingDue } from '../lib/notify'
+import { createProblem, listProblems } from '../api/problems'
+import { createTask, listTasks, updateTaskStatus } from '../api/tasks'
+import { clearFocus, finishFocus, getFocus, setFocus, tickFocus } from '../api/focus'
+import { captureWorkLog } from '../api/workLogs'
+import { ackPing, DEFAULT_PING_MINUTES, getSettings, saveSettings, testToast } from '../api/settings'
+import { PROBLEM_STATUS_LABEL, STATUS_LABEL, type Problem, type TaskItem, type WorkLogSource } from '../types'
+import { minutesUntilPing } from '../lib/notify'
+
+const CHECK_MS = 15_000
+const MINUTE_CHIPS = [5, 10, 15, 20, 30, 45, 60]
+const BREAK_TYPES = ['استراحت', 'چای / قهوه', 'ناهار / غذا', 'انتظار / وقفه']
+
+type Mode = 'log' | 'finish' | 'problem'
+
+type WorkPick =
+  | { kind: 'current'; title: string }
+  | { kind: 'task'; id: number; title: string }
+  | { kind: 'problem'; id: number; title: string }
+  | { kind: 'break'; title: string }
+
+function matches(title: string, query: string) {
+  if (!query.trim()) return true
+  return title.toLowerCase().includes(query.trim().toLowerCase())
+}
+
+function samePick(a: WorkPick | null, b: WorkPick) {
+  if (!a || a.kind !== b.kind) return false
+  if (a.kind === 'current' || a.kind === 'break') return a.title === b.title
+  return a.id === (b as { id: number }).id
+}
 
 export function WorkLogPrompt() {
   const queryClient = useQueryClient()
-  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings, refetchInterval: 15_000 })
+  const pingMinutes = settingsQuery.data?.pingMinutes ?? DEFAULT_PING_MINUTES
+  const lastPingAt = settingsQuery.data?.lastPingAt ?? null
+  const [open, setOpen] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const [queryText, setQueryText] = useState('')
+  const [minutes, setMinutes] = useState<number | null>(null)
+  const [picked, setPicked] = useState<WorkPick | null>(null)
+  const [source, setSource] = useState<WorkLogSource>('Timer')
+  const [problemTitle, setProblemTitle] = useState('')
+  const [mode, setMode] = useState<Mode>('log')
+  const [newTaskTitle, setNewTaskTitle] = useState('')
+  const [error, setError] = useState('')
+  const [eta, setEta] = useState(() => minutesUntilPing(pingMinutes, lastPingAt))
 
-  const focusQuery = useQuery({
-    queryKey: ['focus'],
-    queryFn: () => getFocus(),
-    refetchInterval: 5000,
+  const focusQuery = useQuery({ queryKey: ['focus'], queryFn: getFocus, refetchInterval: 30_000 })
+  const doingQuery = useQuery({
+    queryKey: ['tasks', 'Doing'],
+    queryFn: () => listTasks({ status: 'Doing' }),
+    enabled: open && mode === 'finish',
   })
-
-  const settingsQuery = useQuery({
-    queryKey: ['settings'],
-    queryFn: () => getSettings(),
-    refetchInterval: 15000,
+  const pickTasksQuery = useQuery({
+    queryKey: ['tasks', 'prompt', queryText],
+    queryFn: () => listTasks({ q: queryText.trim() || undefined }),
+    enabled: open && (mode === 'log' || mode === 'problem'),
   })
-
-  const finishMutation = useMutation({
-    mutationFn: (markTaskDone?: boolean) =>
-      finishFocus({
-        markTaskDone,
-        source: 'Timer',
-        durationMinutes: Math.max(1, Math.round(elapsedSeconds / 60)),
-      }),
-    onSuccess: () => {
-      setElapsedSeconds(0)
-      void queryClient.invalidateQueries({ queryKey: ['focus'] })
-      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
-      void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
-    },
-  })
-
-  const clearMutation = useMutation({
-    mutationFn: () => clearFocus(),
-    onSuccess: () => {
-      setElapsedSeconds(0)
-      void queryClient.invalidateQueries({ queryKey: ['focus'] })
-    },
-  })
-
-  const ackMutation = useMutation({
-    mutationFn: () => ackPing(),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['settings'] })
-    },
+  const pickProblemsQuery = useQuery({
+    queryKey: ['problems'],
+    queryFn: listProblems,
+    enabled: open && (mode === 'log' || mode === 'problem'),
   })
 
   const focus = focusQuery.data
-  const settings = settingsQuery.data
+  const current = focus?.active ? focus.description : ''
+
+  const openTasks = useMemo(() => {
+    const rank: Record<string, number> = { Doing: 0, Stuck: 1, Open: 2 }
+    return (pickTasksQuery.data ?? [])
+      .filter((task) => (queryText.trim() || task.status !== 'Done') && matches(task.title, queryText))
+      .sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))
+  }, [pickTasksQuery.data, queryText])
+
+  const openProblems = useMemo(
+    () => (pickProblemsQuery.data ?? []).filter((problem) => matches(problem.title, queryText)),
+    [pickProblemsQuery.data, queryText],
+  )
+
+  const canBreak = Boolean(picked?.kind === 'break' && minutes && minutes > 0)
+  const canSubmit = Boolean(picked && picked.kind !== 'break' && minutes && minutes > 0)
 
   useEffect(() => {
-    if (!focus?.active || !focus.startedAt) {
-      setElapsedSeconds(0)
+    if (settingsQuery.data) setPaused(settingsQuery.data.paused)
+  }, [settingsQuery.data])
+
+  const bumpPing = () => {
+    void ackPing().then(() => queryClient.invalidateQueries({ queryKey: ['settings'] }))
+  }
+
+  const setPausedAndSave = (next: boolean) => {
+    setPaused(next)
+    void saveSettings({ pingMinutes, paused: next }).then((saved) => {
+      void queryClient.setQueryData(['settings'], saved)
+    })
+  }
+
+  const resetPicks = () => {
+    setMinutes(null)
+    setQueryText('')
+    setProblemTitle('')
+    setNewTaskTitle('')
+    setError('')
+    setPicked(current ? { kind: 'current', title: current } : null)
+  }
+
+  const openPrompt = (nextSource: WorkLogSource, nextMode?: Mode) => {
+    setSource(nextSource)
+    resetPicks()
+    setMode(nextMode ?? 'log')
+    setOpen(true)
+  }
+
+  useEffect(() => {
+    const tick = () => setEta(minutesUntilPing(pingMinutes, lastPingAt))
+    tick()
+    const timer = window.setInterval(tick, CHECK_MS)
+    return () => window.clearInterval(timer)
+  }, [pingMinutes, lastPingAt])
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ['focus'] })
+    void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
+    void queryClient.invalidateQueries({ queryKey: ['worklog-summary'] })
+    void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    void queryClient.invalidateQueries({ queryKey: ['problems'] })
+    void queryClient.invalidateQueries({ queryKey: ['entity-worklogs'] })
+    void queryClient.invalidateQueries({ queryKey: ['settings'] })
+  }
+
+  const continueMutation = useMutation({
+    mutationFn: () => tickFocus({ durationMinutes: minutes ?? 0, source }),
+    onSuccess: () => {
+      bumpPing()
+      setOpen(false)
+      refresh()
+    },
+    onError: (err: Error) => setError(err.message),
+  })
+
+  const startMutation = useMutation({
+    mutationFn: (input: { description: string; taskId?: number; problemId?: number }) =>
+      setFocus({
+        description: input.description.trim(),
+        taskId: input.taskId,
+        problemId: input.problemId,
+        durationMinutes: minutes ?? 0,
+        source,
+        log: true,
+      }),
+    onSuccess: () => {
+      resetPicks()
+      bumpPing()
+      setOpen(false)
+      refresh()
+    },
+    onError: (err: Error) => setError(err.message),
+  })
+
+  const finishMutation = useMutation({
+    mutationFn: (input: { markTaskDone?: boolean; taskId?: number }) =>
+      finishFocus({ durationMinutes: minutes ?? 0, source, ...input }),
+    onSuccess: () => {
+      bumpPing()
+      setMode('log')
+      resetPicks()
+      refresh()
+    },
+    onError: (err: Error) => setError(err.message),
+  })
+
+  const skipMutation = useMutation({
+    mutationFn: clearFocus,
+    onSuccess: () => {
+      bumpPing()
+      setOpen(false)
+      refresh()
+    },
+  })
+
+  const taskCreateMutation = useMutation({
+    mutationFn: (title?: string) =>
+      createTask({ title: (title?.trim() || newTaskTitle.trim() || queryText.trim() || problemTitle.trim() || 'کار جدید'), energyType: 'Light' }),
+    onSuccess: (task) => {
+      setNewTaskTitle('')
+      setQueryText('')
+      setPicked({ kind: 'task', id: task.id, title: task.title })
+      setMode('log')
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: (err: Error) => setError(err.message),
+  })
+
+  const problemMutation = useMutation({
+    mutationFn: () => createProblem(problemTitle.trim() || queryText.trim() || 'مسئله جدید'),
+    onSuccess: (problem) => {
+      setProblemTitle('')
+      setPicked({ kind: 'problem', id: problem.id, title: problem.title })
+      setMode('log')
+      void queryClient.invalidateQueries({ queryKey: ['problems'] })
+    },
+    onError: (err: Error) => setError(err.message),
+  })
+
+  const breakMutation = useMutation({
+    mutationFn: () =>
+      captureWorkLog({
+        description: picked?.kind === 'break' ? picked.title : 'استراحت',
+        durationMinutes: minutes ?? 0,
+        source: 'Manual',
+      }),
+    onSuccess: () => {
+      bumpPing()
+      setOpen(false)
+      refresh()
+    },
+    onError: (err: Error) => setError(err.message),
+  })
+
+  const submitLog = () => {
+    if (!picked || !minutes || minutes <= 0) {
+      setError('هم نوع بازه و هم زمان را انتخاب کن.')
       return
     }
-    const started = new Date(focus.startedAt).getTime()
-    const updateElapsed = () => {
-      const now = Date.now()
-      setElapsedSeconds(Math.max(0, Math.floor((now - started) / 1000)))
+    if (picked.kind === 'break') {
+      breakMutation.mutate()
+      return
     }
-    updateElapsed()
-    const timer = setInterval(updateElapsed, 1000)
-    return () => clearInterval(timer)
-  }, [focus?.active, focus?.startedAt])
-
-  const formatTimer = (sec: number) => {
-    const m = Math.floor(sec / 60)
-    const s = sec % 60
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+    if (picked.kind === 'current') {
+      continueMutation.mutate()
+      return
+    }
+    if (picked.kind === 'task') {
+      startMutation.mutate({ description: picked.title, taskId: picked.id })
+      return
+    }
+    startMutation.mutate({ description: picked.title, problemId: picked.id })
   }
 
-  // Active Focus banner
-  if (focus?.active) {
-    return (
-      <aside 
-        id="active-focus-bar"
-        aria-label="نوار وضعیت تمرکز عمیق"
-        className="sticky top-0 z-40 bg-[#0c0e15]/95 border-b border-white/[0.08] px-4 py-2.5 backdrop-blur-xl shadow-xl shadow-black/40"
-      >
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs" dir="rtl">
-          <div className="flex items-center gap-3">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                <Zap className="w-3.5 h-3.5 text-amber-400" />
-                تمرکز عمیق
-              </span>
-              <span className="text-slate-600 font-mono">/</span>
-              <span className="font-semibold text-slate-100 max-w-xs sm:max-w-md md:max-w-lg truncate">
-                {focus.description || 'کار انتخابی'}
-              </span>
+  const busy = startMutation.isPending || continueMutation.isPending || finishMutation.isPending || breakMutation.isPending
+
+  return (
+    <>
+      <div className="fixed bottom-4 left-4 z-30 flex max-w-[min(100%-2rem,42rem)] flex-wrap gap-2">
+        {current && (
+          <span className="rounded-full bg-ember/20 px-3 py-2 text-xs text-amber-100">
+            الان: {current}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={() => openPrompt('Manual')}
+          className="rounded-full bg-ember px-4 py-2 text-sm font-semibold text-ink-950 shadow-lg"
+        >
+          ثبت کار
+        </button>
+        <button
+          type="button"
+          onClick={() => openPrompt('Manual', 'problem')}
+          className="rounded-full bg-ink-800 px-4 py-2 text-sm shadow-lg"
+        >
+          مسئله دارم
+        </button>
+        <button
+          type="button"
+          onClick={() => setPausedAndSave(!paused)}
+          className={`rounded-full px-4 py-2 text-sm shadow-lg ${
+            paused ? 'bg-rose-500 text-white' : 'bg-moss text-white'
+          }`}
+        >
+          {paused ? 'سیستم خاموش' : 'سیستم روشن'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void testToast().then(() => {
+              void queryClient.invalidateQueries({ queryKey: ['settings'] })
+            })
+          }}
+          className="rounded-full bg-ink-800 px-4 py-2 text-sm shadow-lg"
+        >
+          تست نوتیف
+        </button>
+        <span className="self-center text-xs text-paper/40">
+          {paused ? 'سیستم خاموش است' : `هر ${pingMinutes} دقیقه · بعدی ${eta} دقیقه`}
+        </span>
+      </div>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-4 sm:items-center">
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-ink-900 p-5">
+            <p className="text-xs tracking-[0.2em] text-ember">{source}</p>
+
+            {mode === 'log' && (
+              <>
+                <h2 className="mt-2 text-xl font-semibold">چیکار می‌کنی؟</h2>
+                <p className="mt-1 text-sm text-paper/50">
+                  هم کار و هم زمان اجباری است. بدون هر دو ثبت فعال نمی‌شود.
+                </p>
+                {current && (
+                  <p className="mt-3 rounded-2xl bg-ink-800 px-4 py-3 text-sm">الان: {current}</p>
+                )}
+                <p className="mt-4 text-sm font-semibold text-ember">۱) کار یا مسئله را انتخاب کن — اجباری</p>
+                <input
+                  value={queryText}
+                  onChange={(event) => setQueryText(event.target.value)}
+                  placeholder="جستجو در لیست"
+                  autoFocus
+                  className="mt-2 w-full rounded-2xl border border-white/10 bg-ink-950 px-3 py-3"
+                />
+                {current && matches(current, queryText) && (
+                  <button
+                    type="button"
+                    onClick={() => setPicked({ kind: 'current', title: current })}
+                    className={`mt-3 block w-full rounded-2xl px-3 py-2 text-right text-sm ${
+                      picked?.kind === 'current' ? 'bg-ember text-ink-950 font-semibold' : 'bg-ink-800'
+                    }`}
+                  >
+                    {current} — کار فعلی
+                  </button>
+                )}
+                <PickLists
+                  tasks={openTasks}
+                  problems={openProblems}
+                  picked={picked}
+                  busy={busy}
+                  onPick={setPicked}
+                />
+                <section className="mt-4">
+                  <p className="text-xs tracking-[0.2em] text-paper/35">استراحت و غیرکار</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {BREAK_TYPES.filter((title) => matches(title, queryText)).map((title) => (
+                      <button
+                        key={title}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => setPicked({ kind: 'break', title })}
+                        className={`rounded-2xl px-3 py-2 text-sm ${
+                          picked?.kind === 'break' && picked.title === title
+                            ? 'bg-ember font-semibold text-ink-950'
+                            : 'bg-ink-800'
+                        }`}
+                      >
+                        {title}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+                <MinuteChips value={minutes} onChange={setMinutes} />
+                <p className={`mt-3 text-sm ${canSubmit ? 'text-emerald-200' : 'text-rose-200'}`}>
+                  {canSubmit
+                    ? `آماده ثبت: ${picked?.title} — ${minutes} دقیقه`
+                    : 'تا کار و دقیقه را نزنی، ثبت فعال نمی‌شود.'}
+                </p>
+                <button
+                  type="button"
+                  disabled={!canSubmit || busy}
+                  onClick={submitLog}
+                  className="mt-4 w-full rounded-2xl bg-ember px-4 py-3 text-sm font-semibold text-ink-950 disabled:opacity-40"
+                >
+                  ثبت کار و زمان
+                </button>
+                {current && (
+                  <button
+                    type="button"
+                    onClick={() => setMode('finish')}
+                    className="mt-2 w-full rounded-2xl bg-ink-800 px-4 py-2 text-sm"
+                  >
+                    کار قبلی تمام شد
+                  </button>
+                )}
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_auto]">
+                  <input
+                    value={newTaskTitle}
+                    onChange={(event) => setNewTaskTitle(event.target.value)}
+                    placeholder="عنوان کار یا مسئله جدید"
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') taskCreateMutation.mutate()
+                    }}
+                    className="w-full rounded-2xl border border-white/10 bg-ink-950 px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    disabled={taskCreateMutation.isPending}
+                    onClick={() => taskCreateMutation.mutate()}
+                    className="rounded-2xl bg-ember px-3 py-2 text-sm font-semibold text-ink-950"
+                  >
+                    کار جدید
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProblemTitle(newTaskTitle)
+                      setMode('problem')
+                    }}
+                    className="rounded-2xl bg-ink-800 px-3 py-2 text-sm"
+                  >
+                    مسئله جدید
+                  </button>
+                </div>
+              </>
+            )}
+
+            {mode === 'finish' && (
+              <>
+                <h2 className="mt-2 text-xl font-semibold">«{current}» تمام شد</h2>
+                <p className="mt-1 text-sm text-paper/50">اول بگو چند دقیقه صرف شد، بعد ثبت کن.</p>
+                <MinuteChips value={minutes} onChange={setMinutes} />
+                <button
+                  type="button"
+                  disabled={!minutes || minutes <= 0 || busy}
+                  onClick={() => finishMutation.mutate({})}
+                  className="mt-4 w-full rounded-2xl bg-ember px-4 py-3 text-sm font-semibold text-ink-950 disabled:opacity-40"
+                >
+                  ثبت کن و ببند
+                </button>
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-paper/40">اگر کار مرتبط روی بورد است، Done کن:</p>
+                  {(doingQuery.data ?? []).map((task) => (
+                    <button
+                      key={task.id}
+                      type="button"
+                      disabled={!minutes || minutes <= 0 || busy}
+                      onClick={() => {
+                        void finishMutation.mutateAsync({}).then(() => updateTaskStatus(task.id, { status: 'Done' }).then(refresh))
+                      }}
+                      className="block w-full rounded-2xl bg-ink-800 px-4 py-2 text-right text-sm disabled:opacity-40"
+                    >
+                      {task.title} — انجام شد
+                    </button>
+                  ))}
+                </div>
+                <button type="button" onClick={() => setMode('log')} className="mt-3 rounded-2xl px-4 py-2 text-sm text-paper/50">
+                  برگشت
+                </button>
+              </>
+            )}
+
+            {mode === 'problem' && (
+              <>
+                <h2 className="mt-2 text-xl font-semibold">مسئله</h2>
+                <p className="mt-1 text-sm text-paper/45">مسئله موجود را بردار یا یکی جدید باز کن.</p>
+                <input
+                  value={problemTitle}
+                  onChange={(event) => setProblemTitle(event.target.value)}
+                  placeholder="جستجو یا مسئله جدید"
+                  autoFocus
+                  onKeyDown={(event) => { if (event.key === 'Enter') problemMutation.mutate() }}
+                  className="mt-4 w-full rounded-2xl border border-white/10 bg-ink-950 px-3 py-3"
+                />
+                <PickLists
+                  tasks={openTasks}
+                  problems={openProblems}
+                  picked={picked}
+                  busy={busy}
+                  onPick={(next) => {
+                    setPicked(next)
+                    setMode('log')
+                  }}
+                />
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => problemMutation.mutate()}
+                    className="rounded-2xl bg-ember px-4 py-2 text-sm font-semibold text-ink-950"
+                  >
+                    مسئله جدید
+                  </button>
+                  <button
+                    type="button"
+                    disabled={taskCreateMutation.isPending}
+                    onClick={() => taskCreateMutation.mutate(problemTitle)}
+                    className="rounded-2xl bg-ink-800 px-4 py-2 text-sm"
+                  >
+                    کار جدید
+                  </button>
+                </div>
+                <button type="button" onClick={() => setMode('log')} className="mt-2 rounded-2xl px-4 py-2 text-sm text-paper/50">
+                  برگشت به ثبت کار
+                </button>
+              </>
+            )}
+
+            {error && <p className="mt-2 text-sm text-rose-300">{error}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={!canBreak || busy}
+                onClick={() => breakMutation.mutate()}
+                className="rounded-2xl bg-ink-800 px-4 py-2 text-sm disabled:opacity-40"
+              >
+                استراحت بود
+              </button>
+              {current && (
+                <button type="button" onClick={() => skipMutation.mutate()} className="rounded-2xl px-4 py-2 text-sm text-paper/50">
+                  کار فعلی را ول کن
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  bumpPing()
+                  setPausedAndSave(true)
+                  setOpen(false)
+                }}
+                className="rounded-2xl px-4 py-2 text-sm text-paper/50"
+              >
+                سیستم را خاموش کن
+              </button>
             </div>
-            <span className="font-mono px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/[0.08] text-amber-300 font-semibold text-xs tracking-wider">
-              {formatTimer(elapsedSeconds)}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              id="btn-complete-focus"
-              type="button"
-              disabled={finishMutation.isPending}
-              onClick={() => finishMutation.mutate(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-medium transition-all hover:border-emerald-500/50"
-            >
-              <CheckCircle className="w-3.5 h-3.5" />
-              <span>تکمیل و ثبت</span>
-            </button>
-            <button
-              id="btn-log-focus"
-              type="button"
-              disabled={finishMutation.isPending}
-              onClick={() => finishMutation.mutate(false)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-slate-200 border border-white/[0.08] font-medium transition-all"
-            >
-              <Square className="w-3 h-3 fill-current opacity-70" />
-              <span>ثبت لاگ و خروج</span>
-            </button>
-            <button
-              id="btn-cancel-focus"
-              type="button"
-              onClick={() => clearMutation.mutate()}
-              className="px-2.5 py-1.5 rounded-lg text-slate-500 hover:text-slate-300 text-[11px] transition-colors"
-            >
-              لغو
-            </button>
           </div>
         </div>
-      </aside>
-    )
-  }
+      )}
+    </>
+  )
+}
 
-  // Ping due reminder
-  if (settings && !settings.paused && isPingDue(settings.pingMinutes, settings.lastPingAt)) {
-    return (
-      <aside 
-        id="ping-reminder-bar"
-        aria-label="یادآوری ثبت کار"
-        className="sticky top-0 z-40 bg-[#0f121a]/95 border-b border-amber-500/20 px-4 py-2 backdrop-blur-md"
-      >
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-xs" dir="rtl">
-          <div className="flex items-center gap-2">
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
-            <span className="font-medium text-slate-200">
-              زمان ثبت وضعیت فرا رسیده است؛ اکنون روی چه کاری متمرکز هستید؟
-            </span>
-          </div>
+function MinuteChips({ value, onChange }: { value: number | null; onChange: (n: number) => void }) {
+  return (
+    <div className="mt-4">
+      <p className="text-sm font-semibold text-ember">۲) چند دقیقه صرف شد؟ — اجباری</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {MINUTE_CHIPS.map((chip) => (
           <button
-            id="btn-ack-ping"
+            key={chip}
             type="button"
-            onClick={() => ackMutation.mutate()}
-            className="px-3 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-medium transition-colors"
+            onClick={() => onChange(chip)}
+            className={`rounded-2xl px-3 py-2 text-sm ${
+              value === chip ? 'bg-ember font-semibold text-ink-950' : 'bg-ink-800'
+            }`}
           >
-            دیدم، ثبت می‌کنم
+            {chip}m
           </button>
-        </div>
-      </aside>
-    )
-  }
+        ))}
+        <input
+          type="number"
+          min={1}
+          max={480}
+          value={value ?? ''}
+          placeholder="دقیقه"
+          onChange={(event) => {
+            const next = Number(event.target.value)
+            onChange(Number.isFinite(next) && next > 0 ? next : 0)
+          }}
+          className="w-24 rounded-2xl border border-white/10 bg-ink-950 px-3 py-2"
+        />
+      </div>
+    </div>
+  )
+}
 
-  return null
+function PickLists({
+  tasks,
+  problems,
+  picked,
+  busy,
+  onPick,
+}: {
+  tasks: TaskItem[]
+  problems: Problem[]
+  picked: WorkPick | null
+  busy: boolean
+  onPick: (pick: WorkPick) => void
+}) {
+  return (
+    <div className="mt-4 space-y-4">
+      <section>
+        <p className="text-xs tracking-[0.2em] text-paper/35">کارها</p>
+        <div className="mt-2 max-h-40 space-y-2 overflow-y-auto">
+          {tasks.map((task) => {
+            const item: WorkPick = { kind: 'task', id: task.id, title: task.title }
+            const selected = samePick(picked, item)
+            return (
+              <button
+                key={task.id}
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(item)}
+                className={`block w-full rounded-2xl px-3 py-2 text-right text-sm disabled:opacity-50 ${
+                  selected ? 'bg-ember font-semibold text-ink-950' : 'bg-ink-800'
+                }`}
+              >
+                <span>{task.title}</span>
+                <span className="mr-2 text-xs opacity-60">{STATUS_LABEL[task.status]}</span>
+              </button>
+            )
+          })}
+          {tasks.length === 0 && <p className="text-xs text-paper/35">کار بازی پیدا نشد.</p>}
+        </div>
+      </section>
+      <section>
+        <p className="text-xs tracking-[0.2em] text-paper/35">مسئله‌ها</p>
+        <div className="mt-2 max-h-40 space-y-2 overflow-y-auto">
+          {problems.map((problem) => {
+            const item: WorkPick = { kind: 'problem', id: problem.id, title: problem.title }
+            const selected = samePick(picked, item)
+            return (
+              <button
+                key={problem.id}
+                type="button"
+                disabled={busy}
+                onClick={() => onPick(item)}
+                className={`block w-full rounded-2xl px-3 py-2 text-right text-sm disabled:opacity-50 ${
+                  selected ? 'bg-ember font-semibold text-ink-950' : 'bg-ink-800'
+                }`}
+              >
+                <span>{problem.title}</span>
+                <span className="mr-2 text-xs opacity-60">{PROBLEM_STATUS_LABEL[problem.status]}</span>
+              </button>
+            )
+          })}
+          {problems.length === 0 && <p className="text-xs text-paper/35">مسئله‌ای پیدا نشد.</p>}
+        </div>
+      </section>
+    </div>
+  )
 }

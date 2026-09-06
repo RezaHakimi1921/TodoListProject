@@ -4,7 +4,7 @@ namespace TaskOS.Api.Repositories;
 
 public interface ITaskRepository
 {
-    Task<IReadOnlyList<TaskRecord>> ListAsync(string? status, string? energyType, string? tag);
+    Task<IReadOnlyList<TaskRecord>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null);
     Task<TaskRecord?> GetByIdAsync(int id);
     Task<IReadOnlyList<TaskRecord>> ListDoneAsync();
     Task<int> CreateAsync(TaskRecord task);

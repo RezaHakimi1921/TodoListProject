@@ -16,6 +16,7 @@ import {
 import { addTimeline, deleteTask, deleteTimeline, listTimeline, updateTask, updateTaskStatus } from '../api/tasks'
 import { useTrashConfirm } from './ConfirmProvider'
 import { EntityWorkLogs } from './EntityWorkLogs'
+import { TaskChecklist } from './TaskChecklist'
 import { STATUS_LABEL, STUCK_REASONS, type EnergyType, type TaskItem, type TaskStatus } from '../types'
 import { formatPersianDateTime } from '../lib/dates'
 
@@ -256,6 +257,8 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
                 className="w-full rounded-xl bg-[#0b0e16] border border-[#2b354d] px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
               />
             </div>
+
+            <TaskChecklist taskId={task.id} />
 
             {/* Entity Work Logs */}
             <EntityWorkLogs kind="task" id={task.id} />

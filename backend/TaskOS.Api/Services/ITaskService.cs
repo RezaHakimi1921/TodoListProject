@@ -4,7 +4,7 @@ namespace TaskOS.Api.Services;
 
 public interface ITaskService
 {
-    Task<IReadOnlyList<TaskDto>> ListAsync(string? status, string? energyType, string? tag);
+    Task<IReadOnlyList<TaskDto>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null);
     Task<TaskDto?> GetAsync(int id);
     Task<TaskDto> CreateTaskAsync(CreateTaskRequest request);
     Task<TaskDto?> UpdateAsync(int id, UpdateTaskRequest request);

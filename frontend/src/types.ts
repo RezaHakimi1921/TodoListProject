@@ -1,6 +1,6 @@
 export type TaskStatus = 'Open' | 'Doing' | 'Stuck' | 'Done'
 export type EnergyType = 'Deep' | 'Light'
-export type WorkLogSource = 'Timer' | 'Extension' | 'Manual'
+export type WorkLogSource = 'Timer' | 'Extension' | 'Manual' | 'Break'
 export type ProblemStatus = 'Exploring' | 'Chosen' | 'Validated'
 
 export const STUCK_REASONS = [
@@ -27,6 +27,8 @@ export interface TaskItem {
   targetDate?: string | null
   rolledOver?: boolean
   rolledOverFrom?: string | null
+  checklistTotal?: number
+  checklistDone?: number
 }
 
 export interface TimelineEntry {
