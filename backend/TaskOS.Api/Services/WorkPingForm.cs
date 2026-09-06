@@ -212,8 +212,14 @@ public sealed class WorkPingForm : Form
             BackColor = Color.FromArgb(18, 17, 14),
             ForeColor = ForeColor,
             BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Tahoma", 11f)
+            Font = new Font("Tahoma", 11f),
+            PlaceholderText = "عنوان کار یا مسئله جدید"
         };
+        var jiraSeed = items.FirstOrDefault(item => item.Kind == "jira");
+        if (jiraSeed is not null)
+        {
+            _newTitle.Text = StripTicketKey(jiraSeed.Title, jiraSeed.JiraKey);
+        }
         var addTask = RaisedButton("کار جدید", Color.FromArgb(217, 119, 6), Color.FromArgb(18, 17, 14), 96, 36);
         var addProblem = RaisedButton("مسئله جدید", Color.FromArgb(70, 62, 48), ForeColor, 110, 36);
         addTask.Click += (_, _) => CreateIntoList("task");
@@ -583,6 +589,17 @@ public sealed class WorkPingForm : Form
 
         SelectFirstWork();
         RefreshActions();
+    }
+
+    private static string StripTicketKey(string? title, string? key)
+    {
+        var text = (title ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(key) || text.Length == 0) return text;
+        if (text.StartsWith(key, StringComparison.OrdinalIgnoreCase))
+        {
+            text = text[key.Length..].TrimStart(' ', '-', ':', '—');
+        }
+        return text;
     }
 
     private static bool sameWork(WorkPickItem a, WorkPickItem b) =>

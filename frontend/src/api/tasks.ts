@@ -28,6 +28,16 @@ export interface TaskFilters {
   q?: string
 }
 
+export interface TaskDay {
+  date: string
+  total: number
+  done: number
+}
+
+export function listTaskDays() {
+  return api.get<TaskDay[]>('/api/tasks/days')
+}
+
 export function listTasks(filters: TaskFilters = {}) {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)

@@ -159,4 +159,35 @@ public sealed class TaskRepository : ITaskRepository
         var rows = await connection.QueryAsync<TaskRecord>(sql, new { LogDate = logDate });
         return rows.ToList();
     }
+
+    public async Task<TaskRecord?> FindSameTitleOnDayAsync(string title, string day)
+    {
+        const string sql = """
+            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, CreatedAt, UpdatedAt, DoneAt
+            FROM Task
+            WHERE DeletedAt IS NULL
+              AND lower(trim(Title)) = lower(trim(@Title))
+              AND date(CreatedAt, '+3 hours', '+30 minutes') = @Day
+            LIMIT 1
+            """;
+        using var connection = _factory.Create();
+        return await connection.QuerySingleOrDefaultAsync<TaskRecord>(sql, new { Title = title, Day = day });
+    }
+
+    public async Task<IReadOnlyList<TaskDayCount>> ListDaysAsync()
+    {
+        const string sql = """
+            SELECT date(CreatedAt, '+3 hours', '+30 minutes') AS Day,
+                   COUNT(*) AS Total,
+                   CAST(SUM(CASE WHEN Status = 'Done' THEN 1 ELSE 0 END) AS INTEGER) AS Done
+            FROM Task
+            WHERE DeletedAt IS NULL
+            GROUP BY date(CreatedAt, '+3 hours', '+30 minutes')
+            ORDER BY Day DESC
+            LIMIT 90
+            """;
+        using var connection = _factory.Create();
+        var rows = await connection.QueryAsync<TaskDayCount>(sql);
+        return rows.ToList();
+    }
 }

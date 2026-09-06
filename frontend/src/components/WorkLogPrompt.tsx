@@ -190,6 +190,7 @@ export function WorkLogPrompt() {
       setPicked({ kind: 'task', id: task.id, title: task.title })
       setMode('log')
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['task-days'] })
     },
     onError: (err: Error) => setError(err.message),
   })

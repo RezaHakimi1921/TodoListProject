@@ -14,4 +14,6 @@ public interface ITaskService
     Task<TimelineEntryDto?> AddTimelineAsync(int taskId, string note);
     Task<IReadOnlyList<TimelineEntryDto>> ListTimelineAsync(int taskId);
     Task<IReadOnlyList<TaskDto>> ListRelatedToDateAsync(string logDate);
+    Task<TaskDto?> FindSameTitleTodayAsync(string title);
+    Task<IReadOnlyList<TaskDayDto>> ListDaysAsync();
 }

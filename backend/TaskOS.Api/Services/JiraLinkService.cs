@@ -77,12 +77,26 @@ public sealed class JiraLinkService : IJiraLinkService
         TaskDto task;
         if (match is null)
         {
-            task = await _tasks.CreateTaskAsync(new CreateTaskRequest
+            var storedTitle = title.Contains(key, StringComparison.OrdinalIgnoreCase)
+                ? title
+                : title.Length > key.Length
+                    ? title
+                    : $"{key} {title}";
+            var sameDay = await _tasks.FindSameTitleTodayAsync(storedTitle);
+            if (sameDay is not null)
             {
-                Title = title.Contains(key, StringComparison.OrdinalIgnoreCase) ? title : $"{key} {title}",
-                EnergyType = energy,
-                TagList = ["jira"]
-            });
+                task = sameDay;
+            }
+            else
+            {
+                task = await _tasks.CreateTaskAsync(new CreateTaskRequest
+                {
+                    Title = storedTitle,
+                    EnergyType = energy,
+                    TagList = ["jira"]
+                });
+            }
+
             await _links.UpsertAsync(task.Id, key, request.JiraUrl, 1, TaskMapping.Now());
         }
         else

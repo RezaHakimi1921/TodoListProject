@@ -145,7 +145,7 @@ public sealed class WorkPingService : IWorkPingService
             };
         var ticketTitle = string.IsNullOrWhiteSpace(seen.Title) || seen.Title == seen.JiraKey
             ? seen.JiraKey
-            : $"{seen.JiraKey} {seen.Title}";
+            : seen.Title;
         var body = isNewLink
             ? $"کار قبلی: {focus!.Description}{Environment.NewLine}کار جدید: {ticketTitle}{Environment.NewLine}یکی را انتخاب کن: ادامه کار قبلی، یا ادامه با کار جدید."
             : focus?.Active == true

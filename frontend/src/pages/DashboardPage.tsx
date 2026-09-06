@@ -1,4 +1,5 @@
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
   Zap, 
@@ -27,10 +28,22 @@ import type { TaskItem, TaskStatus, StuckReason } from '../types'
 
 export function DashboardPage() {
   const queryClient = useQueryClient()
+  const [params, setParams] = useSearchParams()
   const today = todayIso()
   const yesterday = yesterdayIso()
+  const dateFromUrl = params.get('date')
+  const selectedDate =
+    dateFromUrl === 'all' || (dateFromUrl !== null && /^\d{4}-\d{2}-\d{2}$/.test(dateFromUrl))
+      ? dateFromUrl
+      : today
 
-  const [selectedDate, setSelectedDate] = useState<string>(today)
+  const setSelectedDate = (date: string) => {
+    const next = new URLSearchParams(params)
+    if (date === today) next.delete('date')
+    else next.set('date', date)
+    setParams(next, { replace: true })
+  }
+
   const [selectedStatus, setSelectedStatus] = useState<string>('all')
   const [selectedEnergy, setSelectedEnergy] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -165,6 +178,15 @@ export function DashboardPage() {
               >
                 همه روزها
               </button>
+              {!isToday && !isYesterday && selectedDate !== 'all' && (
+                <button
+                  id="btn-day-selected"
+                  type="button"
+                  className="px-3 py-1 rounded-md text-xs font-medium bg-white/15 text-white font-semibold shadow-sm"
+                >
+                  {formatPersianDateShort(selectedDate)}
+                </button>
+              )}
             </div>
 
             {/* Headline */}

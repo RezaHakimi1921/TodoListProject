@@ -53,6 +53,13 @@ public sealed class TimelineEntryDto
     public string CreatedAt { get; set; } = string.Empty;
 }
 
+public sealed class TaskDayDto
+{
+    public string Date { get; set; } = string.Empty;
+    public int Total { get; set; }
+    public int Done { get; set; }
+}
+
 public sealed class SimilarTaskDto
 {
     public int Id { get; set; }

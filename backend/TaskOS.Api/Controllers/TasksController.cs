@@ -36,6 +36,10 @@ public sealed class TasksController : ControllerBase
         return Ok(await _tasks.GetSimilarTasksAsync(title ?? string.Empty));
     }
 
+    [HttpGet("days")]
+    public async Task<ActionResult<IReadOnlyList<TaskDayDto>>> Days() =>
+        Ok(await _tasks.ListDaysAsync());
+
     [HttpGet("{id:int}")]
     public async Task<ActionResult<TaskDto>> Get(int id)
     {

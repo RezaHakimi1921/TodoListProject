@@ -13,6 +13,7 @@ import {
 import { listTrash } from '../api/trash'
 import { listTasks } from '../api/tasks'
 import { WorkLogPrompt } from './WorkLogPrompt'
+import { PastDaysMenu } from './PastDaysMenu'
 import { formatPersianDate } from '../lib/dates'
 
 export function Layout() {
@@ -125,6 +126,7 @@ export function Layout() {
                 </NavLink>
               )
             })}
+            <PastDaysMenu />
           </nav>
         </div>
       </header>

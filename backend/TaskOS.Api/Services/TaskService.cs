@@ -51,6 +51,12 @@ public sealed class TaskService : ITaskService
             throw new ArgumentException("EnergyType must be Deep or Light.");
         }
 
+        var existing = await _tasks.FindSameTitleOnDayAsync(title, TaskMapping.TodayLocal());
+        if (existing is not null)
+        {
+            throw new ArgumentException("امروز کار با همین عنوان قبلاً ثبت شده.");
+        }
+
         var now = TaskMapping.Now();
         var id = await _tasks.CreateAsync(new TaskRecord
         {
@@ -206,6 +212,23 @@ public sealed class TaskService : ITaskService
     {
         var rows = await _tasks.ListRelatedToDateAsync(logDate);
         return rows.Select(r => TaskMapping.ToDto(r, _agingDays)).ToList();
+    }
+
+    public async Task<TaskDto?> FindSameTitleTodayAsync(string title)
+    {
+        var row = await _tasks.FindSameTitleOnDayAsync(title.Trim(), TaskMapping.TodayLocal());
+        return row is null ? null : TaskMapping.ToDto(row, _agingDays);
+    }
+
+    public async Task<IReadOnlyList<TaskDayDto>> ListDaysAsync()
+    {
+        var rows = await _tasks.ListDaysAsync();
+        return rows.Select(row => new TaskDayDto
+        {
+            Date = row.Day,
+            Total = row.Total,
+            Done = row.Done
+        }).ToList();
     }
 
     private static void ApplyStatus(TaskRecord task, string status, string? stuckReason)

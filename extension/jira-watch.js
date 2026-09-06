@@ -6,15 +6,44 @@ function extractKey(url) {
   return matches?.length ? matches[matches.length - 1].toUpperCase() : null
 }
 
+function cleanTitle(text, key) {
+  let value = String(text || '').replace(/\s+/g, ' ').trim()
+  value = value.replace(/\s*[-|]\s*Jira.*$/i, '')
+  value = value.replace(/\s*[-|]\s*پرتال.*$/i, '')
+  value = value.replace(new RegExp(`^${key}\\s*[-–:]?\\s*`, 'i'), '')
+  value = value.replace(new RegExp(`\\s*[-–:]\\s*${key}$`, 'i'), '')
+  return value.trim()
+}
+
+function readPageTitle(key) {
+  const selectors = [
+    'h1',
+    '[data-testid="issue.views.issue-base.foundation.summary.heading"]',
+    '[data-test-id="issue.views.issue-base.foundation.summary.heading"]',
+    '[data-testid="request-title"]',
+    '[data-test-id="request-title"]',
+    '#summary-val',
+    '.issue-header-content h1',
+  ]
+  for (const selector of selectors) {
+    const nodes = document.querySelectorAll(selector)
+    for (const node of nodes) {
+      const text = cleanTitle(node.textContent, key)
+      if (text.length >= 8 && text.toUpperCase() !== key) return text
+    }
+  }
+  return cleanTitle(document.title, key) || key
+}
+
 function report(force) {
   const url = location.href
-  const title = document.title || ''
   const key = extractKey(url)
   if (!key) {
     lastSent = url
     return
   }
-  const stamp = `${key}|${url}`
+  const title = readPageTitle(key)
+  const stamp = `${key}|${url}|${title}`
   if (!force && stamp === lastSent) return
   lastSent = stamp
   try {
@@ -43,7 +72,8 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') report(true)
 })
 
-const titleEl = document.querySelector('title')
-if (titleEl) {
-  new MutationObserver(() => report(false)).observe(titleEl, { childList: true, characterData: true, subtree: true })
-}
+new MutationObserver(() => report(false)).observe(document.documentElement, {
+  childList: true,
+  subtree: true,
+  characterData: true,
+})

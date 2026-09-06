@@ -35,6 +35,19 @@ internal static class TaskMapping
 
     public static string Now() => DateTime.UtcNow.ToString("o");
 
+    public static string TodayLocal()
+    {
+        try
+        {
+            var zone = TimeZoneInfo.FindSystemTimeZoneById("Iran Standard Time");
+            return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone).ToString("yyyy-MM-dd");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return DateTime.UtcNow.AddHours(3.5).ToString("yyyy-MM-dd");
+        }
+    }
+
     public static TaskDto ToDto(TaskRecord record, int agingDaysThreshold)
     {
         var agingDays = DaysSince(record.UpdatedAt);

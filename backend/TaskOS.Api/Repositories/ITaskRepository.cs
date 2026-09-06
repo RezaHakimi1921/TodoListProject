@@ -13,4 +13,13 @@ public interface ITaskRepository
     Task<IReadOnlyList<TaskTimelineEntry>> ListTimelineAsync(int taskId);
     Task<TaskTimelineEntry> AddTimelineAsync(int taskId, string note, string createdAt);
     Task<IReadOnlyList<TaskRecord>> ListRelatedToDateAsync(string logDate);
+    Task<TaskRecord?> FindSameTitleOnDayAsync(string title, string day);
+    Task<IReadOnlyList<TaskDayCount>> ListDaysAsync();
+}
+
+public sealed class TaskDayCount
+{
+    public string Day { get; set; } = string.Empty;
+    public int Total { get; set; }
+    public int Done { get; set; }
 }

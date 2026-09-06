@@ -26,6 +26,9 @@ let taskItems = []
 let problemItems = []
 
 document.getElementById('sourceLabel').textContent = jiraKey ? `Jira ${jiraKey}` : source
+if (jiraKey && jiraTitle && jiraTitle !== jiraKey) {
+  description.value = jiraTitle
+}
 
 function clampPing(value) {
   const next = Number(value)

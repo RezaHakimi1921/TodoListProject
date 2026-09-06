@@ -34,6 +34,7 @@ export function QuickAddTask() {
       setTags([])
       setError('')
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['task-days'] })
     },
     onError: (err: Error) => setError(err.message),
   })
