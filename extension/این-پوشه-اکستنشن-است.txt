@@ -1,0 +1,14 @@
+این پوشه اکستنشن کروم TaskOS است.
+مسیر: E:\TodoListProject\extension
+نه extesino.
+
+نصب:
+1) chrome://extensions
+2) Developer mode
+3) Load unpacked
+4) همین پوشه را انتخاب کن
+
+یا install.bat را اجرا کن.
+
+نوتیف زمان‌بندی‌شده را خود API ویندوز می‌فرستد.
+اکستنشن برای ثبت سریع از آیکون کروم است.

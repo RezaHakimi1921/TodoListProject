@@ -1,0 +1,25 @@
+# Backend
+**/bin/
+**/obj/
+**/*.user
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.out.log
+**/*.err.log
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/vite.out.log
+frontend/vite.err.log
+
+# Local agent / browser artifacts
+.playwright-mcp/
+
+# IDE / OS
+.vs/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store

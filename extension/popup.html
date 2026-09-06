@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <title>TaskOS Log</title>
+    <style>
+      body {
+        font-family: Tahoma, sans-serif;
+        margin: 0;
+        padding: 16px;
+        width: 380px;
+        background: #1b1914;
+        color: #f4efe4;
+      }
+      input,
+      button { font: inherit; }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        margin: 8px 0;
+        padding: 10px;
+        border: 1px solid #444;
+        border-radius: 12px;
+        background: #12110e;
+        color: #f4efe4;
+      }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      button {
+        border: 0;
+        border-radius: 12px;
+        padding: 10px 12px;
+        cursor: pointer;
+      }
+      .save { background: #d97706; color: #12110e; font-weight: 700; width: 100%; }
+      .paper { background: #f4efe4; color: #12110e; font-weight: 700; width: 100%; }
+      .ghost { background: #353128; color: #f4efe4; }
+      .pick {
+        display: block;
+        width: 100%;
+        text-align: right;
+        background: #353128;
+        color: #f4efe4;
+        margin: 4px 0;
+        font-size: 13px;
+      }
+      .pick span { opacity: 0.5; font-size: 11px; margin-right: 6px; }
+      .group { font-size: 11px; opacity: 0.5; margin: 10px 0 4px; }
+      .list { max-height: 140px; overflow: auto; }
+      .ok { color: #86efac; font-size: 12px; }
+      .err { color: #fda4af; font-size: 12px; }
+      .current { background: #353128; border-radius: 12px; padding: 10px; margin: 8px 0; }
+    </style>
+  </head>
+  <body>
+    <p id="sourceLabel" style="opacity: 0.6; font-size: 12px">Extension</p>
+    <div id="choose">
+      <h3 style="margin: 4px 0 8px">هنوز همین کار؟</h3>
+      <div id="currentBox" class="current"></div>
+      <button id="continueBtn" class="save">در حال انجام کار قبلی</button>
+      <div class="row" style="margin-top: 8px">
+        <button id="finishBtn" class="paper">کار قبلی تمام شد</button>
+      </div>
+      <div class="row" style="margin-top: 8px">
+        <button id="newBtn" class="ghost">کار یا مسئله دیگر</button>
+        <button id="away" class="ghost">استراحت بود</button>
+      </div>
+    </div>
+    <div id="form" hidden>
+      <h3 id="formTitle" style="margin: 4px 0 8px">چیکار می‌کنی؟</h3>
+      <input id="description" placeholder="جستجو یا کار جدید" />
+      <div id="picks"></div>
+      <div class="row">
+        <input id="minutes" type="number" value="10" min="1" max="480" style="width: 90px" />
+        <button id="save" class="save" style="width: auto">شروع با متن جدید</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top: 10px">
+      <button id="pause" class="ghost">Pause / Away</button>
+      <button id="test" class="ghost">تست نوتیف</button>
+      <span id="status"></span>
+    </div>
+    <script src="popup.js"></script>
+  </body>
+</html>
