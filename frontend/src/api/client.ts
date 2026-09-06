@@ -65,11 +65,64 @@ function handleLocalMock<T>(path: string, init?: RequestInit): T {
   const pathname = url.pathname
 
   // Tasks API
+  if (pathname === '/api/tasks/rollover' && method === 'POST') {
+    const today = new Date().toISOString().slice(0, 10)
+    let rolledOverCount = 0
+    store.tasks = store.tasks.map((t) => {
+      if (t.status !== 'Done') {
+        rolledOverCount++
+        return {
+          ...t,
+          rolledOver: true,
+          rolledOverFrom: t.rolledOverFrom || t.createdAt.slice(0, 10),
+          updatedAt: new Date().toISOString(),
+        }
+      }
+      return t
+    })
+
+    if (body?.note && body.note.trim()) {
+      const nextId = store.dailyLogs.reduce((m, l) => Math.max(m, l.id), 0) + 1
+      store.dailyLogs.unshift({
+        id: nextId,
+        logDate: today,
+        note: body.note.trim(),
+        createdAt: new Date().toISOString(),
+      })
+    }
+
+    saveStore(store)
+    return {
+      rolledOverCount,
+      message: `${rolledOverCount} کار به روز بعد منتقل شد.`
+    } as unknown as T
+  }
+
   if (pathname === '/api/tasks' && method === 'GET') {
     let result = [...store.tasks]
     const status = url.searchParams.get('status')
     const energyType = url.searchParams.get('energyType')
     const tag = url.searchParams.get('tag')
+    const date = url.searchParams.get('date')
+    const today = new Date().toISOString().slice(0, 10)
+
+    if (date) {
+      if (date === today) {
+        // Today shows active tasks + tasks done today
+        result = result.filter((t) => {
+          if (t.status !== 'Done') return true
+          return t.doneAt ? t.doneAt.slice(0, 10) === today : false
+        })
+      } else {
+        // Past day shows tasks done on that date or originated on that date
+        result = result.filter((t) => {
+          const doneOnDate = t.doneAt && t.doneAt.slice(0, 10) === date
+          const createdOnDate = t.createdAt.slice(0, 10) === date
+          return doneOnDate || createdOnDate
+        })
+      }
+    }
+
     if (status) result = result.filter((t) => t.status === status)
     if (energyType) result = result.filter((t) => t.energyType === energyType)
     if (tag) result = result.filter((t) => t.tags.includes(tag))

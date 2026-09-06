@@ -24,6 +24,9 @@ export interface TaskItem {
   createdAt: string
   updatedAt: string
   doneAt: string | null
+  targetDate?: string | null
+  rolledOver?: boolean
+  rolledOverFrom?: string | null
 }
 
 export interface TimelineEntry {

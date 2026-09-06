@@ -79,50 +79,57 @@ export function WorkLogPrompt() {
   if (focus?.active) {
     return (
       <aside 
+        id="active-focus-bar"
         aria-label="نوار وضعیت تمرکز عمیق"
-        className="sticky top-0 z-40 bg-gradient-to-r from-amber-500/20 via-[#181d2c] to-amber-500/10 border-b border-amber-500/30 px-4 py-2.5 backdrop-blur-md shadow-lg"
+        className="sticky top-0 z-40 bg-[#0c0e15]/95 border-b border-white/[0.08] px-4 py-2.5 backdrop-blur-xl shadow-xl shadow-black/40"
       >
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-xs" dir="rtl">
           <div className="flex items-center gap-3">
-            <span className="relative flex h-3 w-3">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-60"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
             </span>
-            <span className="font-bold text-amber-300 flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 fill-current" />
-              در حال تمرکز عمیق:
-            </span>
-            <span className="font-medium text-slate-100 max-w-xs sm:max-w-md truncate">
-              {focus.description || 'کار انتخابی'}
-            </span>
-            <span className="font-mono px-2.5 py-0.5 rounded-md bg-black/40 border border-amber-500/30 text-amber-300 font-bold text-sm">
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                تمرکز عمیق
+              </span>
+              <span className="text-slate-600 font-mono">/</span>
+              <span className="font-semibold text-slate-100 max-w-xs sm:max-w-md md:max-w-lg truncate">
+                {focus.description || 'کار انتخابی'}
+              </span>
+            </div>
+            <span className="font-mono px-2 py-0.5 rounded-md bg-white/[0.06] border border-white/[0.08] text-amber-300 font-semibold text-xs tracking-wider">
               {formatTimer(elapsedSeconds)}
             </span>
           </div>
 
           <div className="flex items-center gap-2">
             <button
+              id="btn-complete-focus"
               type="button"
               disabled={finishMutation.isPending}
               onClick={() => finishMutation.mutate(true)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold shadow-sm transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-medium transition-all hover:border-emerald-500/50"
             >
               <CheckCircle className="w-3.5 h-3.5" />
-              <span>پایان و تکمیل کار</span>
+              <span>تکمیل و ثبت</span>
             </button>
             <button
+              id="btn-log-focus"
               type="button"
               disabled={finishMutation.isPending}
               onClick={() => finishMutation.mutate(false)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow-sm transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-slate-200 border border-white/[0.08] font-medium transition-all"
             >
-              <Square className="w-3 h-3 fill-current" />
+              <Square className="w-3 h-3 fill-current opacity-70" />
               <span>ثبت لاگ و خروج</span>
             </button>
             <button
+              id="btn-cancel-focus"
               type="button"
               onClick={() => clearMutation.mutate()}
-              className="px-2.5 py-1.5 rounded-lg text-slate-400 hover:text-rose-400 text-[11px]"
+              className="px-2.5 py-1.5 rounded-lg text-slate-500 hover:text-slate-300 text-[11px] transition-colors"
             >
               لغو
             </button>
@@ -136,20 +143,22 @@ export function WorkLogPrompt() {
   if (settings && !settings.paused && isPingDue(settings.pingMinutes, settings.lastPingAt)) {
     return (
       <aside 
+        id="ping-reminder-bar"
         aria-label="یادآوری ثبت کار"
-        className="sticky top-0 z-40 bg-gradient-to-r from-amber-600/25 via-[#1a1f30] to-amber-600/15 border-b border-amber-500/40 px-4 py-2 backdrop-blur-md"
+        className="sticky top-0 z-40 bg-[#0f121a]/95 border-b border-amber-500/20 px-4 py-2 backdrop-blur-md"
       >
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3 text-xs" dir="rtl">
           <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span className="font-semibold text-amber-200">
-              زمان ثبت وضعیت فرا رسیده است! الان روی چه کاری مشغول هستی؟
+            <Clock className="w-3.5 h-3.5 text-amber-400" />
+            <span className="font-medium text-slate-200">
+              زمان ثبت وضعیت فرا رسیده است؛ اکنون روی چه کاری متمرکز هستید؟
             </span>
           </div>
           <button
+            id="btn-ack-ping"
             type="button"
             onClick={() => ackMutation.mutate()}
-            className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition-colors"
+            className="px-3 py-1 rounded-md bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-medium transition-colors"
           >
             دیدم، ثبت می‌کنم
           </button>

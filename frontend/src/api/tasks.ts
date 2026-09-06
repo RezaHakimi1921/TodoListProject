@@ -13,12 +13,16 @@ const camel = (row: Record<string, unknown>): TaskItem => ({
   createdAt: String(row.createdAt),
   updatedAt: String(row.updatedAt),
   doneAt: (row.doneAt as string | null) ?? null,
+  targetDate: (row.targetDate as string | null) ?? null,
+  rolledOver: Boolean(row.rolledOver),
+  rolledOverFrom: (row.rolledOverFrom as string | null) ?? null,
 })
 
 export interface TaskFilters {
   status?: string
   energyType?: string
   tag?: string
+  date?: string
 }
 
 export function listTasks(filters: TaskFilters = {}) {
@@ -26,10 +30,15 @@ export function listTasks(filters: TaskFilters = {}) {
   if (filters.status) params.set('status', filters.status)
   if (filters.energyType) params.set('energyType', filters.energyType)
   if (filters.tag) params.set('tag', filters.tag)
+  if (filters.date) params.set('date', filters.date)
   const query = params.toString()
   return api.get<Record<string, unknown>[]>(`/api/tasks${query ? `?${query}` : ''}`).then((rows) =>
     rows.map(camel),
   )
+}
+
+export function rolloverDay(note?: string) {
+  return api.post<{ rolledOverCount: number; message: string }>('/api/tasks/rollover', { note })
 }
 
 export function getTask(id: number) {
