@@ -57,8 +57,8 @@ export function clearFocus() {
   return api.delete('/api/focus').then(() => getFocus())
 }
 
-export function startRest() {
-  return api.post<Record<string, unknown>>('/api/focus/rest', {}).then(camel)
+export function startRest(description?: string) {
+  return api.post<Record<string, unknown>>('/api/focus/rest', { description }).then(camel)
 }
 
 export function endRest() {

@@ -4,6 +4,11 @@ namespace TaskOS.Api.Services;
 
 public sealed class WorkPingService : IWorkPingService
 {
+    private static readonly TimeSpan JiraDwell = TimeSpan.FromSeconds(30);
+    private static readonly object JiraWatchLock = new();
+    private static string? _jiraWatchKey;
+    private static DateTime _jiraWatchSince;
+    private static string? _jiraPromptedKey;
     private static int _open;
     private readonly ISettingsService _settings;
     private readonly IFocusService _focus;
@@ -37,10 +42,14 @@ public sealed class WorkPingService : IWorkPingService
     public async Task<bool> TryNotifyAsync(bool force, CancellationToken cancellationToken = default)
     {
         var settings = await _settings.GetAsync();
-        if (!force)
+        if (settings.Paused || await _settings.IsRestingAsync())
         {
-            if (settings.Paused) return false;
-            if (!IsDue(settings)) return false;
+            return false;
+        }
+
+        if (!force && !IsDue(settings))
+        {
+            return false;
         }
 
         if (Interlocked.CompareExchange(ref _open, 1, 0) != 0) return false;
@@ -100,6 +109,62 @@ public sealed class WorkPingService : IWorkPingService
             return;
         }
 
+        if (string.Equals(seen.Decision, "continue", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var key = seen.JiraKey;
+        var now = DateTime.UtcNow;
+        var startTimer = false;
+        lock (JiraWatchLock)
+        {
+            if (!string.Equals(_jiraWatchKey, key, StringComparison.OrdinalIgnoreCase))
+            {
+                _jiraWatchKey = key;
+                _jiraWatchSince = now;
+                _jiraPromptedKey = null;
+                startTimer = true;
+                _logger.LogInformation("Jira switch dwell started for {Key}", key);
+            }
+            else if (now - _jiraWatchSince < JiraDwell
+                     || string.Equals(_jiraPromptedKey, key, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+            else
+            {
+                _jiraPromptedKey = key;
+            }
+        }
+
+        if (startTimer)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(JiraDwell);
+                lock (JiraWatchLock)
+                {
+                    if (!string.Equals(_jiraWatchKey, key, StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(_jiraPromptedKey, key, StringComparison.OrdinalIgnoreCase)
+                        || DateTime.UtcNow - _jiraWatchSince < JiraDwell)
+                    {
+                        return;
+                    }
+
+                    _jiraPromptedKey = key;
+                }
+
+                ShowJiraPrompt(seen);
+            });
+            return;
+        }
+
+        ShowJiraPrompt(seen);
+    }
+
+    private void ShowJiraPrompt(JiraSeenDto seen)
+    {
         var factory = _scopes;
         var logger = _logger;
         _ = Task.Run(() =>
@@ -146,11 +211,42 @@ public sealed class WorkPingService : IWorkPingService
         var ticketTitle = string.IsNullOrWhiteSpace(seen.Title) || seen.Title == seen.JiraKey
             ? seen.JiraKey
             : seen.Title;
-        var body = isNewLink
-            ? $"کار قبلی: {focus!.Description}{Environment.NewLine}کار جدید: {ticketTitle}{Environment.NewLine}یکی را انتخاب کن: ادامه کار قبلی، یا ادامه با کار جدید."
-            : focus?.Active == true
-                ? $"الان: {focus.Description}{Environment.NewLine}تکت: {ticketTitle}"
-                : $"تکت: {ticketTitle}";
+
+        if (isNewLink)
+        {
+            var choice = SwitchAskForm.ShowCentered(focus!.Description ?? "", ticketTitle);
+            if (choice == SwitchAskChoice.JustChecking || choice == SwitchAskChoice.Dismissed)
+            {
+                return;
+            }
+
+            if (choice == SwitchAskChoice.Rest)
+            {
+                ApplyAsync(new WorkPingResult
+                {
+                    Choice = WorkPingChoice.Break,
+                    Minutes = Math.Max(1, settings.PingMinutes),
+                    Work = new WorkPickItem { Kind = "break", Title = "استراحت" }
+                }, settings).GetAwaiter().GetResult();
+                return;
+            }
+
+            using var startScope = _scopes.CreateScope();
+            var jira = startScope.ServiceProvider.GetRequiredService<IJiraLinkService>();
+            jira.StartAsync(new JiraStartRequest
+            {
+                JiraKey = seen.JiraKey,
+                JiraUrl = seen.JiraUrl,
+                Title = ticketTitle,
+                FinishPrevious = true,
+                DurationMinutes = settings.PingMinutes
+            }).GetAwaiter().GetResult();
+            return;
+        }
+
+        var body = focus?.Active == true
+            ? $"الان: {focus.Description}{Environment.NewLine}تکت: {ticketTitle}"
+            : $"تکت: {ticketTitle}";
 
         var items = LoadPicksAsync(new WorkFocusDto
         {

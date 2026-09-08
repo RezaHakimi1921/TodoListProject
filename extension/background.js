@@ -167,6 +167,13 @@ function extractJiraKey(url) {
   }
 }
 
+function isJunkJiraTitle(text, key) {
+  const value = String(text || '').trim()
+  if (!value || value.toUpperCase() === key) return true
+  if (/jira\.smartx\.ir/i.test(value) || /^https?:/i.test(value) || value.includes('://')) return true
+  return /^(service management|product support|task|bug|story|epic|sub-task|subtask|incident|change|problem|support request)$/i.test(value)
+}
+
 function cleanJiraTitle(title, key) {
   let text = String(title || '')
   text = text.replace(/\s*[-|]\s*Jira.*$/i, '')
@@ -175,10 +182,22 @@ function cleanJiraTitle(title, key) {
   text = text.replace(new RegExp(`^${key}\\s*[-:]?\\s*`, 'i'), '')
   text = text.replace(new RegExp(`\\s*[-–:]\\s*${key}$`, 'i'), '')
   text = text.trim()
-  if (!text || /^(service management|task|bug|story|epic|sub-task|subtask|incident|change|problem|support request)$/i.test(text)) {
-    return key
-  }
+  if (isJunkJiraTitle(text, key)) return key
   return text
+}
+
+async function fetchJiraSummary(key) {
+  try {
+    const response = await fetch(`https://${JIRA_HOST}/rest/api/2/issue/${encodeURIComponent(key)}?fields=summary`, {
+      credentials: 'include',
+    })
+    if (!response.ok) return null
+    const data = await response.json()
+    const summary = cleanJiraTitle(data?.fields?.summary, key)
+    return isJunkJiraTitle(summary, key) ? null : summary
+  } catch {
+    return null
+  }
 }
 
 function isJiraHost(url) {
@@ -335,6 +354,10 @@ async function handleJiraDwell(payload) {
   if (debounce[payload.key] && Date.now() - debounce[payload.key] < DEBOUNCE_MS) return
 
   void assignPsToMe(payload.key)
+  let title = cleanJiraTitle(payload.title, payload.key)
+  if (isJunkJiraTitle(title, payload.key)) {
+    title = (await fetchJiraSummary(payload.key)) || title
+  }
 
   const focus = await getFocus()
   const task = await findTaskByJiraKey(payload.key)
@@ -353,7 +376,7 @@ async function handleJiraDwell(payload) {
   const seen = {
     jiraKey: payload.key,
     jiraUrl: payload.url,
-    title: payload.title,
+    title,
     decision,
     currentFocus: focus,
   }

@@ -8,6 +8,7 @@ public sealed class WorkFocusDto
     public int? ProblemId { get; set; }
     public string? StartedAt { get; set; }
     public string? UpdatedAt { get; set; }
+    public bool IsResting { get; set; }
 }
 
 public sealed class SetFocusRequest
@@ -26,4 +27,9 @@ public sealed class FocusActionRequest
     public string? Source { get; set; }
     public bool MarkTaskDone { get; set; }
     public int? TaskId { get; set; }
+}
+
+public sealed class StartRestRequest
+{
+    public string? Description { get; set; }
 }

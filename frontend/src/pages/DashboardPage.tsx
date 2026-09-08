@@ -132,8 +132,9 @@ export function DashboardPage() {
         const digits = query.replace(/^[a-z]+-/, '')
         const matchTitle = task.title.toLowerCase().includes(query)
         const matchTag = task.tags.some((t) => t.toLowerCase().includes(query))
+        const matchId = String(task.id) === query || String(task.id).includes(query)
         const matchJira = key.includes(query) || url.includes(query) || (digits.length >= 3 && (key.endsWith('-' + digits) || key.endsWith(digits)))
-        if (!matchTitle && !matchTag && !matchJira) return false
+        if (!matchTitle && !matchTag && !matchId && !matchJira) return false
       }
       return true
     })

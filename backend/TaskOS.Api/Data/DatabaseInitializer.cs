@@ -14,7 +14,9 @@ public sealed class DatabaseInitializer
         ("WorkLogEntry", "ProblemId", "INTEGER NULL"),
         ("Problem", "DeletedAt", "TEXT NULL"),
         ("ProblemOption", "DeletedAt", "TEXT NULL"),
-        ("WorkFocus", "ProblemId", "INTEGER NULL")
+        ("WorkFocus", "ProblemId", "INTEGER NULL"),
+        ("Task", "Ownership", "TEXT NOT NULL DEFAULT 'Mine'"),
+        ("TaskJira", "Description", "TEXT NULL")
     ];
 
     private readonly SqliteConnectionFactory _factory;

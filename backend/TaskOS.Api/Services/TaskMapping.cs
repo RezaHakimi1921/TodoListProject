@@ -64,7 +64,8 @@ internal static class TaskMapping
             AgingDays = agingDays,
             CreatedAt = record.CreatedAt,
             UpdatedAt = record.UpdatedAt,
-            DoneAt = record.DoneAt
+            DoneAt = record.DoneAt,
+            Ownership = TaskOwnerships.Normalize(record.Ownership)
         };
     }
 

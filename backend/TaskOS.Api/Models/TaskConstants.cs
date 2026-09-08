@@ -28,6 +28,20 @@ public static class EnergyTypes
     };
 }
 
+public static class TaskOwnerships
+{
+    public const string Mine = "Mine";
+    public const string Other = "Other";
+
+    public static readonly HashSet<string> All = new(StringComparer.OrdinalIgnoreCase)
+    {
+        Mine, Other
+    };
+
+    public static string Normalize(string? value) =>
+        string.Equals(value, Other, StringComparison.OrdinalIgnoreCase) ? Other : Mine;
+}
+
 public static class StuckReasons
 {
     public const string WaitingOnSomeone = "منتظر کسی‌ام";

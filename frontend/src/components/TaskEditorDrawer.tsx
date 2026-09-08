@@ -170,6 +170,17 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
                   onChange={(e) => {
                     const next = e.target.value as TaskStatus
                     setStatus(next)
+                    if (next === 'Stuck') {
+                      const reason = stuckReason || 'سخته'
+                      setStuckReason(reason)
+                      void updateTaskStatus(task.id, { status: 'Stuck', stuckReason: reason })
+                        .then((updated) => {
+                          setStatus(updated.status)
+                          void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+                        })
+                        .catch((err: Error) => setError(err.message))
+                      return
+                    }
                     statusMutation.mutate(next)
                   }}
                   className="w-full rounded-xl bg-[#0b0e16] border border-[#2b354d] px-3 py-2 text-xs text-slate-200 focus:border-amber-500 focus:outline-none"

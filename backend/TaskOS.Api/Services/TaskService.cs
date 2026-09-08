@@ -8,13 +8,15 @@ namespace TaskOS.Api.Services;
 public sealed class TaskService : ITaskService
 {
     private readonly ITaskRepository _tasks;
+    private readonly ITaskJiraRepository _jira;
     private readonly ITaskChecklistService _checklist;
     private readonly int _agingDays;
     private readonly double _similarityThreshold;
 
-    public TaskService(ITaskRepository tasks, ITaskChecklistService checklist, IConfiguration configuration)
+    public TaskService(ITaskRepository tasks, ITaskJiraRepository jira, ITaskChecklistService checklist, IConfiguration configuration)
     {
         _tasks = tasks;
+        _jira = jira;
         _checklist = checklist;
         _agingDays = configuration.GetValue("TaskOS:AgingDays", 3);
         _similarityThreshold = configuration.GetValue("TaskOS:SimilarityThreshold", 0.6);
@@ -25,6 +27,7 @@ public sealed class TaskService : ITaskService
         var rows = await _tasks.ListAsync(status, energyType, tag, date, q);
         var dtos = rows.Select(r => TaskMapping.ToDto(r, _agingDays)).ToList();
         await _checklist.AttachCountsAsync(dtos);
+        await AttachJiraAsync(dtos);
         return dtos;
     }
 
@@ -32,9 +35,7 @@ public sealed class TaskService : ITaskService
     {
         var row = await _tasks.GetByIdAsync(id);
         if (row is null) return null;
-        var dto = TaskMapping.ToDto(row, _agingDays);
-        await _checklist.AttachCountsAsync([dto]);
-        return dto;
+        return await WithExtrasAsync(TaskMapping.ToDto(row, _agingDays));
     }
 
     public async Task<TaskDto> CreateTaskAsync(CreateTaskRequest request)
@@ -64,13 +65,14 @@ public sealed class TaskService : ITaskService
             Status = TaskStatuses.Open,
             EnergyType = energy,
             Tags = TaskMapping.JoinTags(request.Tags, request.TagList),
+            Ownership = TaskOwnerships.Mine,
             CreatedAt = now,
             UpdatedAt = now
         });
 
         var created = await _tasks.GetByIdAsync(id)
                       ?? throw new InvalidOperationException("Task was created but could not be reloaded.");
-        return TaskMapping.ToDto(created, _agingDays);
+        return await WithExtrasAsync(TaskMapping.ToDto(created, _agingDays));
     }
 
     public async Task<TaskDto?> UpdateAsync(int id, UpdateTaskRequest request)
@@ -101,9 +103,10 @@ public sealed class TaskService : ITaskService
         existing.Title = title;
         existing.EnergyType = request.EnergyType;
         existing.Tags = TaskMapping.JoinTags(request.Tags, request.TagList);
+        existing.Ownership = TaskOwnerships.Normalize(request.Ownership ?? existing.Ownership);
         existing.UpdatedAt = TaskMapping.Now();
         await _tasks.UpdateAsync(existing);
-        return TaskMapping.ToDto(existing, _agingDays);
+        return await WithExtrasAsync(TaskMapping.ToDto(existing, _agingDays));
     }
 
     public async Task<TaskDto?> UpdateStatusAsync(int id, UpdateTaskStatusRequest request)
@@ -148,7 +151,7 @@ public sealed class TaskService : ITaskService
         ApplyStatus(existing, status, reason);
         existing.UpdatedAt = TaskMapping.Now();
         await _tasks.UpdateAsync(existing);
-        return TaskMapping.ToDto(existing, _agingDays);
+        return await WithExtrasAsync(TaskMapping.ToDto(existing, _agingDays));
     }
 
     public Task<bool> DeleteAsync(int id) => _tasks.DeleteAsync(id);
@@ -211,13 +214,15 @@ public sealed class TaskService : ITaskService
     public async Task<IReadOnlyList<TaskDto>> ListRelatedToDateAsync(string logDate)
     {
         var rows = await _tasks.ListRelatedToDateAsync(logDate);
-        return rows.Select(r => TaskMapping.ToDto(r, _agingDays)).ToList();
+        var dtos = rows.Select(r => TaskMapping.ToDto(r, _agingDays)).ToList();
+        await AttachJiraAsync(dtos);
+        return dtos;
     }
 
     public async Task<TaskDto?> FindSameTitleTodayAsync(string title)
     {
         var row = await _tasks.FindSameTitleOnDayAsync(title.Trim(), TaskMapping.TodayLocal());
-        return row is null ? null : TaskMapping.ToDto(row, _agingDays);
+        return row is null ? null : await WithExtrasAsync(TaskMapping.ToDto(row, _agingDays));
     }
 
     public async Task<IReadOnlyList<TaskDayDto>> ListDaysAsync()
@@ -229,6 +234,27 @@ public sealed class TaskService : ITaskService
             Total = row.Total,
             Done = row.Done
         }).ToList();
+    }
+
+    private async Task<TaskDto> WithExtrasAsync(TaskDto dto)
+    {
+        await _checklist.AttachCountsAsync([dto]);
+        await AttachJiraAsync([dto]);
+        return dto;
+    }
+
+    private async Task AttachJiraAsync(IReadOnlyList<TaskDto> dtos)
+    {
+        if (dtos.Count == 0) return;
+        var links = await _jira.ListByTaskIdsAsync(dtos.Select(item => item.Id).ToArray());
+        var byId = links.ToDictionary(item => item.TaskId);
+        foreach (var dto in dtos)
+        {
+            if (!byId.TryGetValue(dto.Id, out var link)) continue;
+            dto.JiraKey = link.JiraKey;
+            dto.JiraUrl = link.JiraUrl;
+            dto.JiraDescription = link.Description;
+        }
     }
 
     private static void ApplyStatus(TaskRecord task, string status, string? stuckReason)

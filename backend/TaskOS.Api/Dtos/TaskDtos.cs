@@ -15,6 +15,10 @@ public sealed class TaskDto
     public string? DoneAt { get; set; }
     public int ChecklistTotal { get; set; }
     public int ChecklistDone { get; set; }
+    public string? JiraKey { get; set; }
+    public string? JiraUrl { get; set; }
+    public string? JiraDescription { get; set; }
+    public string Ownership { get; set; } = "Mine";
 }
 
 public sealed class CreateTaskRequest
@@ -32,6 +36,7 @@ public sealed class UpdateTaskRequest
     public string EnergyType { get; set; } = string.Empty;
     public string? Tags { get; set; }
     public IReadOnlyList<string>? TagList { get; set; }
+    public string? Ownership { get; set; }
 }
 
 public sealed class UpdateTaskStatusRequest

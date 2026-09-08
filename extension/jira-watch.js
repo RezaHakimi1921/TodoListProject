@@ -14,20 +14,22 @@ function cleanTitle(text, key) {
   let value = String(text || '').replace(/\s+/g, ' ').trim()
   value = value.replace(/\s*[-|]\s*Jira.*$/i, '')
   value = value.replace(/\s*[-|]\s*پرتال.*$/i, '')
-  value = value.replace(new RegExp(`^${key}\s*[-–:]?\s*`, 'i'), '')
-  value = value.replace(new RegExp(`\s*[-–:]\s*${key}$`, 'i'), '')
-  return value.trim()
+  value = value.replace(new RegExp('^' + key + '\\s*[-–:]?\\s*', 'i'), '')
+  value = value.replace(new RegExp('\\s*[-–:]\\s*' + key + '$', 'i'), '')
+  value = value.trim()
+  if (/jira\.smartx\.ir/i.test(value) || /^https?:/i.test(value) || value.includes('://')) return ''
+  return value
 }
 
 function readPageTitle(key) {
   const selectors = [
-    'h1',
     '[data-testid="issue.views.issue-base.foundation.summary.heading"]',
     '[data-test-id="issue.views.issue-base.foundation.summary.heading"]',
     '[data-testid="request-title"]',
     '[data-test-id="request-title"]',
     '#summary-val',
     '.issue-header-content h1',
+    'h1',
   ]
   for (const selector of selectors) {
     const nodes = document.querySelectorAll(selector)

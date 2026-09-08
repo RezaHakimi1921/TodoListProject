@@ -1,27 +1,87 @@
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { ExternalLink, Play } from 'lucide-react'
-import { getFocus } from '../api/focus'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Coffee, ExternalLink, Play, Utensils } from 'lucide-react'
+import { endRest, getFocus, startRest } from '../api/focus'
 import { getTask } from '../api/tasks'
 import { taskJiraKey, taskJiraUrl } from '../lib/jira'
 
+const REST_KINDS = [
+  { title: 'استراحت', icon: Coffee },
+  { title: 'چای / قهوه', icon: Coffee },
+  { title: 'ناهار / غذا', icon: Utensils },
+] as const
+
 export function NowWorkingBanner() {
+  const queryClient = useQueryClient()
   const focusQuery = useQuery({ queryKey: ['focus'], queryFn: getFocus, refetchInterval: 15_000 })
   const focus = focusQuery.data
   const taskQuery = useQuery({
     queryKey: ['task', focus?.taskId],
     queryFn: () => getTask(Number(focus?.taskId)),
-    enabled: Number.isFinite(focus?.taskId),
+    enabled: Number.isFinite(focus?.taskId) && !focus?.isResting,
+  })
+  const restMutation = useMutation({
+    mutationFn: (title: string) => startRest(title),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['focus'] })
+      void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+  const endRestMutation = useMutation({
+    mutationFn: () => endRest(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['focus'] })
+      void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
+      void queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
   })
   const active = Boolean(focus?.active && focus.description)
+  const resting = Boolean(focus?.isResting)
   const task = taskQuery.data
   const jiraUrl = task ? taskJiraUrl(task) : null
   const jiraKey = task ? taskJiraKey(task) : null
+
+  if (resting) {
+    return (
+      <section className="rounded-2xl border border-sky-400/30 bg-sky-400/10 px-4 py-3.5">
+        <p className="text-[10px] font-semibold tracking-wide text-sky-300/90 mb-1">داری استراحت می‌کنی</p>
+        <div className="flex items-center gap-2">
+          <Coffee className="w-4 h-4 text-sky-300 shrink-0" />
+          <p className="text-base sm:text-lg font-bold text-white leading-snug break-words">
+            {focus?.description || 'استراحت'}
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={endRestMutation.isPending}
+          onClick={() => endRestMutation.mutate()}
+          className="mt-3 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 text-xs font-bold px-3 py-1.5"
+        >
+          برگشتم به کار
+        </button>
+      </section>
+    )
+  }
+
   if (!active) {
     return (
       <section className="rounded-2xl border border-white/[0.08] bg-[#10131b] px-4 py-3.5">
         <p className="text-[10px] font-semibold tracking-wide text-slate-500 mb-1">الان روی این کار هستی</p>
         <p className="text-sm text-slate-400">هنوز تمرکزی شروع نشده.</p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {REST_KINDS.map((item) => (
+            <button
+              key={item.title}
+              type="button"
+              disabled={restMutation.isPending}
+              onClick={() => restMutation.mutate(item.title)}
+              className="rounded-xl border border-white/10 bg-white/[0.04] px-2.5 py-1.5 text-[11px] text-slate-300 hover:border-sky-400/40 hover:text-white"
+            >
+              {item.title}
+            </button>
+          ))}
+        </div>
       </section>
     )
   }
@@ -44,6 +104,19 @@ export function NowWorkingBanner() {
             {jiraKey}
           </a>
         ) : null}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {REST_KINDS.map((item) => (
+          <button
+            key={item.title}
+            type="button"
+            disabled={restMutation.isPending}
+            onClick={() => restMutation.mutate(item.title)}
+            className="rounded-xl border border-white/10 bg-black/20 px-2.5 py-1.5 text-[11px] text-slate-200 hover:border-sky-400/40 hover:text-white"
+          >
+            {item.title}
+          </button>
+        ))}
       </div>
     </section>
   )

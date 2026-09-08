@@ -54,7 +54,7 @@ public sealed class JiraLinkService : IJiraLinkService
     public async Task<JiraSeenDto> StartAsync(JiraStartRequest request)
     {
         var key = NormalizeKey(request.JiraKey);
-        var title = string.IsNullOrWhiteSpace(request.Title) ? key : request.Title.Trim();
+        var title = CleanTitle(request.Title, key);
         var focus = await _focus.GetAsync();
 
         if (focus.Active && (request.FinishPrevious || request.MarkPreviousDone))
@@ -102,6 +102,18 @@ public sealed class JiraLinkService : IJiraLinkService
         else
         {
             task = await _tasks.GetAsync(match.TaskId) ?? throw new InvalidOperationException("Task not found.");
+            if (IsJunkTitle(task.Title, key) && !IsJunkTitle(title, key))
+            {
+                await _tasks.UpdateAsync(task.Id, new UpdateTaskRequest
+                {
+                    Title = title,
+                    Status = task.Status,
+                    EnergyType = task.EnergyType,
+                    TagList = task.Tags,
+                    Ownership = task.Ownership
+                });
+                task = await _tasks.GetAsync(task.Id) ?? task;
+            }
             if (string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
             {
                 await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = TaskStatuses.Doing });
@@ -180,6 +192,31 @@ public sealed class JiraLinkService : IJiraLinkService
         }
 
         throw new ArgumentException("jiraKey must look like PROJ-123.");
+    }
+
+    private static string CleanTitle(string? raw, string key)
+    {
+        var title = string.IsNullOrWhiteSpace(raw) ? key : raw.Trim();
+        return IsJunkTitle(title, key) ? key : title;
+    }
+
+    private static bool IsJunkTitle(string? title, string key)
+    {
+        var text = (title ?? string.Empty).Trim();
+        if (text.Length == 0 || text.Equals(key, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (text.Contains("jira.smartx.ir", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("://", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return text.Equals("Service Management", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("Product Support", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ExtractKeyFromText(string? text)

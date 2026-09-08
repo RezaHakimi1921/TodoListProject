@@ -16,13 +16,27 @@ public sealed class TaskRepository : ITaskRepository
     public async Task<IReadOnlyList<TaskRecord>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null)
     {
         var sql = """
-            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, CreatedAt, UpdatedAt, DoneAt
+            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt
             FROM Task
             WHERE DeletedAt IS NULL
               AND (@Status IS NULL OR Status = @Status)
               AND (@EnergyType IS NULL OR EnergyType = @EnergyType)
               AND (@Tag IS NULL OR (',' || IFNULL(Tags, '') || ',') LIKE '%,' || @Tag || ',%')
-              AND (@Q IS NULL OR Title LIKE '%' || @Q || '%' OR IFNULL(Tags, '') LIKE '%' || @Q || '%')
+              AND (
+                    @Q IS NULL
+                    OR CAST(Id AS TEXT) = @Q
+                    OR CAST(Id AS TEXT) LIKE '%' || @Q || '%'
+                    OR Title LIKE '%' || @Q || '%'
+                    OR IFNULL(Tags, '') LIKE '%' || @Q || '%'
+                    OR EXISTS (
+                        SELECT 1 FROM TaskJira j
+                        WHERE j.TaskId = Task.Id
+                          AND (
+                                j.JiraKey LIKE '%' || @Q || '%'
+                             OR IFNULL(j.JiraUrl, '') LIKE '%' || @Q || '%'
+                          )
+                      )
+                  )
               AND (
                     @Date IS NULL
                     OR @Q IS NOT NULL
@@ -49,7 +63,7 @@ public sealed class TaskRepository : ITaskRepository
     public async Task<TaskRecord?> GetByIdAsync(int id)
     {
         const string sql = """
-            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, CreatedAt, UpdatedAt, DoneAt
+            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt
             FROM Task
             WHERE Id = @Id AND DeletedAt IS NULL
             """;
@@ -60,7 +74,7 @@ public sealed class TaskRepository : ITaskRepository
     public async Task<IReadOnlyList<TaskRecord>> ListDoneAsync()
     {
         const string sql = """
-            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, CreatedAt, UpdatedAt, DoneAt
+            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt
             FROM Task
             WHERE Status = 'Done' AND DeletedAt IS NULL
             ORDER BY DoneAt DESC, UpdatedAt DESC
@@ -73,8 +87,8 @@ public sealed class TaskRepository : ITaskRepository
     public async Task<int> CreateAsync(TaskRecord task)
     {
         const string sql = """
-            INSERT INTO Task (Title, Status, EnergyType, Tags, StuckReason, CreatedAt, UpdatedAt, DoneAt)
-            VALUES (@Title, @Status, @EnergyType, @Tags, @StuckReason, @CreatedAt, @UpdatedAt, @DoneAt);
+            INSERT INTO Task (Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt)
+            VALUES (@Title, @Status, @EnergyType, @Tags, @StuckReason, @Ownership, @CreatedAt, @UpdatedAt, @DoneAt);
             SELECT last_insert_rowid();
             """;
         using var connection = _factory.Create();
@@ -90,6 +104,7 @@ public sealed class TaskRepository : ITaskRepository
                 EnergyType = @EnergyType,
                 Tags = @Tags,
                 StuckReason = @StuckReason,
+                Ownership = @Ownership,
                 UpdatedAt = @UpdatedAt,
                 DoneAt = @DoneAt
             WHERE Id = @Id AND DeletedAt IS NULL
@@ -140,7 +155,7 @@ public sealed class TaskRepository : ITaskRepository
     public async Task<IReadOnlyList<TaskRecord>> ListRelatedToDateAsync(string logDate)
     {
         const string sql = """
-            SELECT DISTINCT t.Id, t.Title, t.Status, t.EnergyType, t.Tags, t.StuckReason,
+            SELECT DISTINCT t.Id, t.Title, t.Status, t.EnergyType, t.Tags, t.StuckReason, t.Ownership,
                    t.CreatedAt, t.UpdatedAt, t.DoneAt
             FROM Task t
             WHERE t.DeletedAt IS NULL
@@ -163,7 +178,7 @@ public sealed class TaskRepository : ITaskRepository
     public async Task<TaskRecord?> FindSameTitleOnDayAsync(string title, string day)
     {
         const string sql = """
-            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, CreatedAt, UpdatedAt, DoneAt
+            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt
             FROM Task
             WHERE DeletedAt IS NULL
               AND lower(trim(Title)) = lower(trim(@Title))

@@ -218,6 +218,27 @@ export function WorkLogPage() {
           <Plus className="w-4 h-4 text-amber-400" />
           ثبت دستی زمان کار
         </h3>
+        <div className="mb-3 flex flex-wrap gap-2">
+          {['استراحت', 'چای / قهوه', 'ناهار / غذا', 'انتظار / وقفه'].map((title) => (
+            <button
+              key={title}
+              type="button"
+              disabled={addMutation.isPending}
+              onClick={() => {
+                void captureWorkLog({
+                  description: title,
+                  durationMinutes: Math.max(1, Number(minutes) || 15),
+                  source: 'Break',
+                }).then(() => {
+                  void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
+                })
+              }}
+              className="rounded-xl border border-sky-500/20 bg-sky-500/10 px-2.5 py-1.5 text-[11px] text-sky-200 hover:border-sky-400/50"
+            >
+              {title}
+            </button>
+          ))}
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
           <div className="md:col-span-5">

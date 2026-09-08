@@ -13,7 +13,8 @@ import {
 import { 
   deleteTask, 
   getTask, 
-  updateTask
+  updateTask,
+  updateTaskStatus
 } from '../api/tasks'
 import { useTrashConfirm } from '../components/ConfirmProvider'
 import { EntityWorkLogs } from '../components/EntityWorkLogs'
@@ -56,14 +57,18 @@ export function TaskDetailPage() {
   }, [taskQuery.data])
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      updateTask(taskId, {
+    mutationFn: async () => {
+      if (status === 'Stuck') {
+        await updateTaskStatus(taskId, { status: 'Stuck', stuckReason: stuckReason || 'سخته' })
+      }
+      return updateTask(taskId, {
         title: title.trim(),
         status,
         energyType,
         tags: tags.split(/[,،]+/).map((item) => item.trim()).filter(Boolean).join(','),
         ownership,
-      }),
+      })
+    },
     onSuccess: () => {
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)

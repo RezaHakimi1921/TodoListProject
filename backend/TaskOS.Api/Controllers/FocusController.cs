@@ -65,7 +65,8 @@ public sealed class FocusController : ControllerBase
     public async Task<ActionResult<WorkFocusDto>> Clear() => Ok(await _focus.ClearAsync());
 
     [HttpPost("rest")]
-    public async Task<ActionResult<WorkFocusDto>> StartRest() => Ok(await _focus.StartRestAsync());
+    public async Task<ActionResult<WorkFocusDto>> StartRest([FromBody] StartRestRequest? request) =>
+        Ok(await _focus.StartRestAsync(request?.Description));
 
     [HttpPost("rest/end")]
     public async Task<ActionResult<WorkFocusDto>> EndRest() => Ok(await _focus.EndRestAsync());

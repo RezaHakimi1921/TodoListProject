@@ -34,6 +34,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
   const queryClient = useQueryClient()
   const askTrash = useTrashConfirm()
   const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [statusError, setStatusError] = useState('')
   const [switchWait, setSwitchWait] = useState(() => remainingFocusSwitchMs(task.id))
 
   useEffect(() => {
@@ -47,18 +48,41 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
     }
   }, [task.id])
 
+  useEffect(() => {
+    if (!showStatusMenu) return
+    const close = () => setShowStatusMenu(false)
+    window.addEventListener('click', close)
+    return () => window.removeEventListener('click', close)
+  }, [showStatusMenu])
+
   const isDone = task.status === 'Done'
   const isPaused = isFocusPaused(task)
   const isDoing = task.status === 'Doing'
   const isStuck = task.status === 'Stuck' && !isPaused
 
-  const statusMutation = useMutation({
-    mutationFn: (newStatus: TaskStatus) => updateTaskStatus(task.id, { status: newStatus }),
-    onSuccess: () => {
-      setShowStatusMenu(false)
-      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
-    },
-  })
+  const applyStatus = (next: TaskStatus, stuckReason?: string) => {
+    setStatusError('')
+    const input =
+      next === 'Stuck'
+        ? { status: next, stuckReason: stuckReason || 'سخته' }
+        : { status: next }
+    void updateTaskStatus(task.id, input)
+      .then(async (updated) => {
+        if (updated.title !== task.title) {
+          await updateTask(task.id, {
+            title: task.title,
+            status: updated.status,
+            energyType: updated.energyType,
+            tags: updated.tags.join(','),
+            ownership: updated.ownership,
+          })
+        }
+        setShowStatusMenu(false)
+        void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+      })
+      .catch((err: Error) => setStatusError(err.message))
+  }
 
   const focusMutation = useMutation({
     mutationFn: () => requestTaskFocus(task),
@@ -84,7 +108,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
   }
 
   const toggleDone = () => {
-    statusMutation.mutate(isDone ? 'Open' : 'Done')
+    applyStatus(isDone ? 'Open' : 'Done')
   }
 
   return (
@@ -150,7 +174,10 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
               <button
                 id={`btn-status-dropdown-${task.id}`}
                 type="button"
-                onClick={() => setShowStatusMenu((v) => !v)}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  setShowStatusMenu((v) => !v)
+                }}
                 className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded border transition-colors ${
                   isDoing
                     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
@@ -169,56 +196,40 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
 
               {showStatusMenu && (
                 <div 
-                  className="absolute right-0 top-full mt-1.5 z-20 w-36 rounded-xl border border-white/10 bg-[#141722] p-1 shadow-2xl backdrop-blur-md"
-                  onMouseLeave={() => setShowStatusMenu(false)}
+                  className="absolute right-0 top-full mt-1.5 z-50 w-44 rounded-xl border border-white/10 bg-[#141722] p-1 shadow-2xl backdrop-blur-md"
+                  onClick={(event) => event.stopPropagation()}
                 >
                   <button
                     type="button"
-                    onClick={() => statusMutation.mutate('Open')}
+                    onClick={() => applyStatus('Open')}
                     className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-white/[0.06] transition-colors"
                   >
                     باز برای اقدام
                   </button>
                   <button
                     type="button"
-                    onClick={() => statusMutation.mutate('Doing')}
+                    onClick={() => applyStatus('Doing')}
                     className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-emerald-400 hover:bg-emerald-500/10 transition-colors font-medium"
                   >
                     در حال انجام
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      const original = task.title
-                      void updateTaskStatus(task.id, { status: 'Stuck', stuckReason: FOCUS_PAUSED_REASON })
-                        .then(async (updated) => {
-                          if (updated.title !== original) {
-                            await updateTask(task.id, {
-                              title: original,
-                              status: updated.status,
-                              energyType: updated.energyType,
-                              tags: updated.tags.join(','),
-                              ownership: updated.ownership,
-                            })
-                          }
-                          void queryClient.invalidateQueries({ queryKey: ['tasks'] })
-                          void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
-                        })
-                    }}
+                    onClick={() => applyStatus('Stuck', FOCUS_PAUSED_REASON)}
                     className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-amber-300 hover:bg-amber-500/10 transition-colors font-medium"
                   >
                     در حال انجام متوقف شده
                   </button>
                   <button
                     type="button"
-                    onClick={() => updateTaskStatus(task.id, { status: 'Stuck', stuckReason: 'سخته' }).then(() => queryClient.invalidateQueries({ queryKey: ['tasks'] }))}
+                    onClick={() => applyStatus('Stuck', 'سخته')}
                     className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-rose-400 hover:bg-rose-500/10 transition-colors font-medium"
                   >
                     متوقف / گیر کرده
                   </button>
                   <button
                     type="button"
-                    onClick={() => statusMutation.mutate('Done')}
+                    onClick={() => applyStatus('Done')}
                     className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-white/[0.06] transition-colors"
                   >
                     انجام شد
@@ -291,6 +302,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
             </div>
           )}
 
+          {statusError && <p className="mt-2 text-[11px] text-rose-300">{statusError}</p>}
           <TagChipList tags={task.tags} />
         </div>
 

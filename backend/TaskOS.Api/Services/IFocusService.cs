@@ -9,4 +9,6 @@ public interface IFocusService
     Task<WorkFocusDto> TickAsync(FocusActionRequest request);
     Task<WorkFocusDto> FinishAsync(FocusActionRequest request);
     Task<WorkFocusDto> ClearAsync();
+    Task<WorkFocusDto> StartRestAsync(string? description = null);
+    Task<WorkFocusDto> EndRestAsync();
 }
