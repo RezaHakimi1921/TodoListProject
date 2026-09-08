@@ -5,7 +5,7 @@ const JIRA_NOTE = 'taskos-jira'
 const API = 'http://127.0.0.1:5088'
 const DEFAULT_PING = 10
 const JIRA_HOST = 'jira.smartx.ir'
-const DWELL_MS = 400
+const DWELL_MS = 30 * 1000
 const DEBOUNCE_MS = 20 * 1000
 const KEY_IN_URL = /[A-Z][A-Z0-9]+-\d+/gi
 
@@ -188,6 +188,51 @@ function clearPending(tabId) {
   pending.delete(tabId)
 }
 
+async function readWatch() {
+  const stored = await chrome.storage.local.get(['jiraWatch'])
+  return stored.jiraWatch || null
+}
+
+async function writeWatch(watch) {
+  if (!watch) {
+    await chrome.storage.local.remove('jiraWatch')
+    return
+  }
+  await chrome.storage.local.set({ jiraWatch: watch })
+}
+
+async function getActiveTab() {
+  const focused = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
+  if (focused[0]) return focused[0]
+  const current = await chrome.tabs.query({ active: true, currentWindow: true })
+  return current[0] || null
+}
+
+function tabKey(tab) {
+  return tab?.url ? extractJiraKey(tab.url) : null
+}
+
+async function stillOnKey(key) {
+  const tab = await getActiveTab()
+  return Boolean(tab && tabKey(tab) === key)
+}
+
+async function findTaskByJiraKey(key) {
+  try {
+    const response = await fetch(`${API}/api/tasks?q=${encodeURIComponent(key)}`)
+    if (!response.ok) return null
+    const rows = await response.json()
+    const upper = String(key).toUpperCase()
+    return (Array.isArray(rows) ? rows : []).find((row) => {
+      const rowKey = String(row.jiraKey || '').toUpperCase()
+      const title = String(row.title || '').toUpperCase()
+      return rowKey === upper || title.includes(upper)
+    }) || null
+  } catch {
+    return null
+  }
+}
+
 async function handleJiraHome() {
   const stored = await chrome.storage.local.get(['jiraDebounce', 'paused'])
   if (stored.paused) return
@@ -206,9 +251,15 @@ async function handleJiraHome() {
 }
 
 function scheduleJiraCheck(tab) {
+  void scheduleJiraCheckAsync(tab)
+}
+
+async function scheduleJiraCheckAsync(tab) {
   if (!tab?.id || !tab.url) return
   const key = extractJiraKey(tab.url)
   if (!key) {
+    const watch = await readWatch()
+    if (watch) await writeWatch(null)
     if (isJiraHost(tab.url)) {
       const existing = pending.get(tab.id)
       if (existing && existing.key === '__home__') return
@@ -223,62 +274,85 @@ function scheduleJiraCheck(tab) {
     clearPending(tab.id)
     return
   }
-  const existing = pending.get(tab.id)
-  if (existing && existing.key === key && existing.url === tab.url) return
-  clearPending(tab.id)
-  const payload = {
-    key,
-    url: tab.url,
-    title: cleanJiraTitle(tab.title, key),
+
+  const title = cleanJiraTitle(tab.title, key)
+  const now = Date.now()
+  const watch = await readWatch()
+  const since = watch && watch.key === key && Number(watch.since) > 0 ? Number(watch.since) : now
+  if (!watch || watch.key !== key || watch.url !== tab.url || watch.title !== title) {
+    await writeWatch({ key, since, url: tab.url, title })
   }
+
+  const remaining = Math.max(0, DWELL_MS - (now - since))
+  const existing = pending.get(tab.id)
+  if (existing && existing.key === key) {
+    existing.url = tab.url
+    existing.title = title
+    return
+  }
+  clearPending(tab.id)
+  const payload = { key, url: tab.url, title }
   const timer = setTimeout(() => {
     pending.delete(tab.id)
-    void handleJiraSeen(payload)
-  }, DWELL_MS)
+    void handleJiraDwell(payload)
+  }, remaining)
   pending.set(tab.id, { ...payload, timer })
 }
 
-async function handleJiraSeen(payload) {
+async function handleJiraDwell(payload) {
   if (!isProductSupport(payload.key)) return
-  void assignPsToMe(payload.key)
-  const stored = await chrome.storage.local.get(['jiraDebounce'])
-  const debounce = stored.jiraDebounce || {}
-  const stampId = payload.url || payload.key
-  if (debounce[stampId] && Date.now() - debounce[stampId] < DEBOUNCE_MS) return
+  if (!(await stillOnKey(payload.key))) return
 
-  let seen
-  try {
-    const response = await fetch(`${API}/api/jira/seen`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jiraKey: payload.key,
-        jiraUrl: payload.url,
-        title: payload.title,
-      }),
-    })
-    if (!response.ok) {
-      await openPopup(jiraQuery({
-        jiraKey: payload.key,
-        jiraUrl: payload.url,
-        title: payload.title,
-        decision: 'ask-create',
-      }))
-      return
-    }
-    seen = await response.json()
-  } catch {
-    await openPopup(jiraQuery({
-      jiraKey: payload.key,
-      jiraUrl: payload.url,
-      title: payload.title,
-      decision: 'ask-create',
-    }))
+  const watch = await readWatch()
+  if (!watch || watch.key !== payload.key) return
+  const elapsed = Date.now() - Number(watch.since || 0)
+  if (elapsed < DWELL_MS) {
+    const tab = await getActiveTab()
+    if (!tab?.id) return
+    clearPending(tab.id)
+    const timer = setTimeout(() => {
+      pending.delete(tab.id)
+      void handleJiraDwell({
+        key: payload.key,
+        url: tab.url || payload.url,
+        title: cleanJiraTitle(tab.title, payload.key),
+      })
+    }, DWELL_MS - elapsed)
+    pending.set(tab.id, { key: payload.key, url: tab.url || payload.url, title: payload.title, timer })
     return
   }
 
-  debounce[stampId] = Date.now()
+  const stored = await chrome.storage.local.get(['jiraDebounce', 'paused'])
+  if (stored.paused) return
+  const debounce = stored.jiraDebounce || {}
+  if (debounce[payload.key] && Date.now() - debounce[payload.key] < DEBOUNCE_MS) return
+
+  void assignPsToMe(payload.key)
+
+  const focus = await getFocus()
+  const task = await findTaskByJiraKey(payload.key)
+  let decision = 'ask-create'
+  if (task) {
+    if (focus?.active && focus.taskId === task.id) decision = 'continue'
+    else if (focus?.active && focus.taskId && focus.taskId !== task.id) decision = 'ask-switch'
+    else decision = 'ask-start'
+  }
+  if (decision === 'continue') {
+    debounce[payload.key] = Date.now()
+    await chrome.storage.local.set({ jiraDebounce: debounce })
+    return
+  }
+
+  const seen = {
+    jiraKey: payload.key,
+    jiraUrl: payload.url,
+    title: payload.title,
+    decision,
+    currentFocus: focus,
+  }
+  debounce[payload.key] = Date.now()
   await chrome.storage.local.set({ jiraDebounce: debounce, lastJira: seen })
+  await showJiraAsk(seen)
 }
 
 function jiraQuery(seen) {
@@ -396,7 +470,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
   try {
-    scheduleJiraCheck(await chrome.tabs.get(tabId))
+    const tab = await chrome.tabs.get(tabId)
+    const key = tabKey(tab)
+    const watch = await readWatch()
+    if (watch && watch.key !== key) await writeWatch(null)
+    scheduleJiraCheck(tab)
   } catch {
     /* tab gone */
   }

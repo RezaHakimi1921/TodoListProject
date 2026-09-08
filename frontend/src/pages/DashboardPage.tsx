@@ -18,13 +18,13 @@ import {
   X,
   Sparkles
 } from 'lucide-react'
-import { listTasks, updateTaskStatus, rolloverDay } from '../api/tasks'
+import { listTaskDays, listTasks, updateTaskStatus, closeWorkday } from '../api/tasks'
 import { QuickAddTask } from '../components/QuickAddTask'
 import { TaskCard } from '../components/TaskCard'
 import { TaskEditorDrawer } from '../components/TaskEditorDrawer'
 import { AgingModal } from '../components/AgingModal'
 import { NowWorkingBanner } from '../components/NowWorkingBanner'
-import { todayIso, yesterdayIso, formatPersianDate, formatPersianDateShort } from '../lib/dates'
+import { todayIso, yesterdayIso, formatPersianDate, formatPersianDateShort, getRelativeDayLabel } from '../lib/dates'
 import { isFocusPaused, type TaskItem, type TaskStatus, type StuckReason } from '../types'
 
 export function DashboardPage() {
@@ -57,6 +57,9 @@ export function DashboardPage() {
   const isToday = selectedDate === today
   const isYesterday = selectedDate === yesterday
 
+  const daysQuery = useQuery({ queryKey: ['task-days'], queryFn: listTaskDays })
+  const extraPastDays = (daysQuery.data ?? []).filter((row) => row.date && row.date !== today && row.date !== yesterday)
+
   const tasksQuery = useQuery({
     queryKey: ['tasks', selectedDate, searchQuery],
     queryFn: () =>
@@ -81,12 +84,13 @@ export function DashboardPage() {
   })
 
   const rolloverMutation = useMutation({
-    mutationFn: (note?: string) => rolloverDay(note),
+    mutationFn: (note?: string) => closeWorkday(note),
     onSuccess: () => {
       setShowRolloverModal(false)
       setRolloverNote('')
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
       void queryClient.invalidateQueries({ queryKey: ['dailyLogs'] })
+      void queryClient.invalidateQueries({ queryKey: ['focus'] })
     },
   })
 
@@ -176,6 +180,20 @@ export function DashboardPage() {
               >
                 دیروز ({formatPersianDateShort(yesterday)})
               </button>
+              {extraPastDays.map((row) => (
+                <button
+                  key={row.date}
+                  type="button"
+                  onClick={() => setSelectedDate(row.date)}
+                  className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                    selectedDate === row.date
+                      ? 'bg-white/15 text-white font-semibold shadow-sm'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {getRelativeDayLabel(row.date)} ({row.done}/{row.total})
+                </button>
+              ))}
               <button
                 id="btn-day-all"
                 type="button"
@@ -446,7 +464,7 @@ export function DashboardPage() {
 
       {/* Rollover Modal (End of Workday Confirmation) */}
       {showRolloverModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in" dir="rtl">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in" dir="rtl">
           <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#121520] p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
               <div className="flex items-center gap-2">
@@ -486,6 +504,14 @@ export function DashboardPage() {
               />
             </div>
 
+            {rolloverMutation.isError && (
+              <p className="text-xs text-rose-300">
+                {rolloverMutation.error instanceof Error
+                  ? rolloverMutation.error.message
+                  : 'ثبت پایان روز انجام نشد.'}
+              </p>
+            )}
+
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
@@ -502,7 +528,7 @@ export function DashboardPage() {
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white text-slate-950 font-semibold text-xs hover:bg-slate-200 transition-all shadow-sm"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>تایید و انتقال به روز بعد</span>
+                <span>{rolloverMutation.isPending ? 'در حال ثبت...' : 'تایید و بستن روز'}</span>
               </button>
             </div>
           </div>

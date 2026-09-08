@@ -5,27 +5,22 @@ import {
   ArrowRight, 
   Trash2, 
   CheckCircle2, 
-  Clock, 
   Zap, 
   Feather, 
   Tag, 
-  Send, 
   AlertTriangle 
 } from 'lucide-react'
 import { 
-  addTimeline, 
   deleteTask, 
-  deleteTimeline, 
   getTask, 
-  listTimeline, 
-  updateTask, 
-  updateTaskStatus 
+  updateTask
 } from '../api/tasks'
 import { useTrashConfirm } from '../components/ConfirmProvider'
 import { EntityWorkLogs } from '../components/EntityWorkLogs'
 import { TaskChecklist } from '../components/TaskChecklist'
-import { STATUS_LABEL, STUCK_REASONS, type EnergyType, type TaskStatus } from '../types'
-import { formatPersianDateTime } from '../lib/dates'
+import { TaskCommentThread } from '../components/TaskCommentThread'
+import { TaskOwnershipToggle } from '../components/TaskOwnershipToggle'
+import { STUCK_REASONS, type EnergyType, type TaskOwnership, type TaskStatus } from '../types'
 
 export function TaskDetailPage() {
   const { id } = useParams()
@@ -37,20 +32,14 @@ export function TaskDetailPage() {
   const [title, setTitle] = useState('')
   const [status, setStatus] = useState<TaskStatus>('Open')
   const [energyType, setEnergyType] = useState<EnergyType>('Light')
+  const [ownership, setOwnership] = useState<TaskOwnership>('Mine')
   const [tags, setTags] = useState('')
   const [stuckReason, setStuckReason] = useState('')
-  const [note, setNote] = useState('')
   const [saved, setSaved] = useState(false)
 
   const taskQuery = useQuery({
     queryKey: ['task', taskId],
     queryFn: () => getTask(taskId),
-    enabled: Number.isFinite(taskId),
-  })
-
-  const timelineQuery = useQuery({
-    queryKey: ['timeline', taskId],
-    queryFn: () => listTimeline(taskId),
     enabled: Number.isFinite(taskId),
   })
 
@@ -60,6 +49,7 @@ export function TaskDetailPage() {
     setTitle(task.title)
     setStatus(task.status)
     setEnergyType(task.energyType)
+    setOwnership(task.ownership === 'Other' ? 'Other' : 'Mine')
     setTags(task.tags.join(', '))
     setStuckReason(task.stuckReason || '')
   }, [taskQuery.data])
@@ -71,6 +61,7 @@ export function TaskDetailPage() {
         status,
         energyType,
         tags,
+        ownership,
       }),
     onSuccess: () => {
       setSaved(true)
@@ -80,19 +71,18 @@ export function TaskDetailPage() {
     },
   })
 
-  const timelineMutation = useMutation({
-    mutationFn: () => addTimeline(taskId, note.trim()),
+  const ownershipMutation = useMutation({
+    mutationFn: (next: TaskOwnership) =>
+      updateTask(taskId, {
+        title: title.trim() || taskQuery.data?.title || '',
+        status,
+        energyType,
+        tags,
+        ownership: next,
+      }),
     onSuccess: () => {
-      setNote('')
-      void queryClient.invalidateQueries({ queryKey: ['timeline', taskId] })
-    },
-  })
-
-  const deleteLineMutation = useMutation({
-    mutationFn: (entryId: number) => deleteTimeline(taskId, entryId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['timeline', taskId] })
-      void queryClient.invalidateQueries({ queryKey: ['trash'] })
+      void queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
   })
 
@@ -200,6 +190,15 @@ export function TaskDetailPage() {
           </div>
         </div>
 
+        <TaskOwnershipToggle
+          value={ownership}
+          disabled={ownershipMutation.isPending}
+          onChange={(next) => {
+            setOwnership(next)
+            ownershipMutation.mutate(next)
+          }}
+        />
+
         {status === 'Stuck' && (
           <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30">
             <label className="block text-xs font-bold text-rose-300 mb-1.5 flex items-center gap-1">
@@ -254,60 +253,7 @@ export function TaskDetailPage() {
       {/* Entity Work Logs */}
       <EntityWorkLogs kind="task" id={taskId} />
 
-      {/* Timeline Section */}
-      <div className="rounded-3xl border border-[#212738] bg-[#141824] p-6 shadow-xl space-y-4">
-        <div className="flex items-center gap-2">
-          <Clock className="w-5 h-5 text-amber-400" />
-          <h3 className="text-base font-bold text-white">تایم‌لاین و سیر پیشرفت کار</h3>
-        </div>
-
-        <div className="flex gap-2">
-          <input
-            type="text"
-            placeholder="یادداشت پیشرفت یا مانع جدید..."
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && note.trim()) {
-                e.preventDefault()
-                timelineMutation.mutate()
-              }
-            }}
-            className="flex-1 rounded-xl bg-[#0b0e16] border border-[#2b354d] px-4 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500"
-          />
-          <button
-            type="button"
-            disabled={!note.trim() || timelineMutation.isPending}
-            onClick={() => timelineMutation.mutate()}
-            className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1 shadow-md"
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>ثبت</span>
-          </button>
-        </div>
-
-        <div className="divide-y divide-slate-800/80 pt-2">
-          {timelineQuery.data?.length === 0 ? (
-            <p className="py-4 text-center text-xs text-slate-500">یادداشتی ثبت نشده است.</p>
-          ) : (
-            timelineQuery.data?.map((item) => (
-              <div key={item.id} className="py-3 flex items-start justify-between gap-3 text-xs">
-                <div>
-                  <p className="text-slate-200 font-medium leading-relaxed">{item.note}</p>
-                  <span className="text-[11px] text-slate-500">{formatPersianDateTime(item.createdAt)}</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => deleteLineMutation.mutate(item.id)}
-                  className="p-1 text-slate-500 hover:text-rose-400 rounded transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      <TaskCommentThread taskId={taskId} jiraKey={taskQuery.data.jiraKey} />
     </div>
   )
 }

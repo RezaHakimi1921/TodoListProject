@@ -1,6 +1,7 @@
 export type TaskStatus = 'Open' | 'Doing' | 'Stuck' | 'Done'
 export type EnergyType = 'Deep' | 'Light'
-export type WorkLogSource = 'Timer' | 'Extension' | 'Manual' | 'Break'
+export type TaskOwnership = 'Mine' | 'Other'
+export type WorkLogSource = 'Timer' | 'Extension' | 'Manual' | 'Break' | 'Auto'
 export type ProblemStatus = 'Exploring' | 'Chosen' | 'Validated'
 
 export const STUCK_REASONS = [
@@ -44,6 +45,7 @@ export interface TaskItem {
   checklistDone?: number
   jiraKey?: string | null
   jiraUrl?: string | null
+  ownership?: TaskOwnership
 }
 
 export interface TimelineEntry {
@@ -75,6 +77,7 @@ export interface WorkLogEntry {
   taskId?: number | null
   problemId?: number | null
   createdAt: string
+  jiraWorklogId?: string | null
 }
 
 export interface WorkLogGroup {
@@ -138,3 +141,7 @@ export const SPARK_QUESTIONS = [
   'کدام بخش این راه‌حل را می‌توانی بدون آسیب زدن به هدف اصلی حذف کنی؟',
   'اگر یک هفته بعد این انتخاب شکست بخورد، چه نشانه‌ای زودتر از همه آن را هشدار می‌داد؟',
 ]
+
+export function isAutomaticWorkLog(source: string | null | undefined) {
+  return source === 'Auto' || source === 'Timer' || source === 'Extension'
+}

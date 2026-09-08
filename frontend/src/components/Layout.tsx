@@ -17,9 +17,11 @@ import { WorkLogPrompt } from './WorkLogPrompt'
 import { PastDaysMenu } from './PastDaysMenu'
 import { formatPersianDate } from '../lib/dates'
 import { useFocusTaskStatus } from '../hooks/useFocusTaskStatus'
+import { useJiraClosedTasks } from '../hooks/useJiraClosedTasks'
 
 export function Layout() {
   useFocusTaskStatus()
+  useJiraClosedTasks()
   const trashQuery = useQuery({
     queryKey: ['trash'],
     queryFn: () => listTrash(),
@@ -104,7 +106,7 @@ export function Layout() {
           </div>
 
           {/* Navigation Tabs Bar */}
-          <nav className="flex items-center gap-1 overflow-x-auto py-1.5 -mb-px border-t border-white/[0.05] no-scrollbar">
+          <nav className="flex items-center gap-1 overflow-x-auto overflow-y-visible py-1.5 -mb-px border-t border-white/[0.05] no-scrollbar">
             {navItems.map((item) => {
               const Icon = item.icon
               return (

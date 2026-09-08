@@ -1,24 +1,23 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
   X, 
   Trash2, 
-  Clock, 
   Tag, 
   Zap, 
   Feather, 
-  Send, 
   ExternalLink,
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react'
-import { addTimeline, deleteTask, deleteTimeline, listTimeline, updateTask, updateTaskStatus } from '../api/tasks'
+import { deleteTask, updateTask, updateTaskStatus } from '../api/tasks'
 import { useTrashConfirm } from './ConfirmProvider'
 import { EntityWorkLogs } from './EntityWorkLogs'
 import { TaskChecklist } from './TaskChecklist'
-import { STATUS_LABEL, STUCK_REASONS, type EnergyType, type TaskItem, type TaskStatus } from '../types'
-import { formatPersianDateTime } from '../lib/dates'
+import { TaskCommentThread } from './TaskCommentThread'
+import { TaskOwnershipToggle } from './TaskOwnershipToggle'
+import { STUCK_REASONS, type EnergyType, type TaskItem, type TaskOwnership, type TaskStatus } from '../types'
 
 interface Props {
   task: TaskItem | null
@@ -32,9 +31,9 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
   const [title, setTitle] = useState('')
   const [status, setStatus] = useState<TaskStatus>('Open')
   const [energyType, setEnergyType] = useState<EnergyType>('Light')
+  const [ownership, setOwnership] = useState<TaskOwnership>('Mine')
   const [tags, setTags] = useState('')
   const [stuckReason, setStuckReason] = useState('')
-  const [note, setNote] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -42,17 +41,11 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
     setTitle(task.title)
     setStatus(task.status)
     setEnergyType(task.energyType)
+    setOwnership(task.ownership === 'Other' ? 'Other' : 'Mine')
     setTags(task.tags.join(', '))
     setStuckReason(task.stuckReason || '')
-    setNote('')
     setError('')
   }, [task])
-
-  const timelineQuery = useQuery({
-    queryKey: ['timeline', task?.id],
-    queryFn: () => listTimeline(task!.id),
-    enabled: Boolean(task),
-  })
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -61,6 +54,7 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
         status,
         energyType,
         tags,
+        ownership,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
@@ -83,21 +77,20 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
     onError: (err: Error) => setError(err.message),
   })
 
-  const timelineMutation = useMutation({
-    mutationFn: () => addTimeline(task!.id, note.trim()),
+  const ownershipMutation = useMutation({
+    mutationFn: (next: TaskOwnership) =>
+      updateTask(task!.id, {
+        title: title.trim() || task!.title,
+        status,
+        energyType,
+        tags,
+        ownership: next,
+      }),
     onSuccess: () => {
-      setNote('')
-      void queryClient.invalidateQueries({ queryKey: ['timeline', task?.id] })
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['task', task?.id] })
     },
     onError: (err: Error) => setError(err.message),
-  })
-
-  const deleteLineMutation = useMutation({
-    mutationFn: (entryId: number) => deleteTimeline(task!.id, entryId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['timeline', task?.id] })
-      void queryClient.invalidateQueries({ queryKey: ['trash'] })
-    },
   })
 
   const deleteMutation = useMutation({
@@ -218,6 +211,15 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
               </div>
             </div>
 
+            <TaskOwnershipToggle
+              value={ownership}
+              disabled={ownershipMutation.isPending}
+              onChange={(next) => {
+                setOwnership(next)
+                ownershipMutation.mutate(next)
+              }}
+            />
+
             {/* Stuck Reason if stuck */}
             {status === 'Stuck' && (
               <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3">
@@ -263,67 +265,11 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
             {/* Entity Work Logs */}
             <EntityWorkLogs kind="task" id={task.id} />
 
-            {/* Timeline Notes */}
-            <div className="rounded-2xl border border-[#262f44] bg-[#141824] p-4">
-              <div className="flex items-center gap-2 mb-3">
-                <Clock className="w-4 h-4 text-amber-400" />
-                <h4 className="text-sm font-bold text-slate-200">یادداشت‌ها و خط زمانی (Timeline)</h4>
-              </div>
-
-              {/* Add note */}
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && note.trim()) {
-                      e.preventDefault()
-                      timelineMutation.mutate()
-                    }
-                  }}
-                  placeholder="یادداشت، تصمیم یا پیشرفت جدید بنویسید..."
-                  className="flex-1 rounded-xl bg-[#0b0e16] border border-[#2b354d] px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  disabled={!note.trim() || timelineMutation.isPending}
-                  onClick={() => timelineMutation.mutate()}
-                  className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center gap-1"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>ثبت</span>
-                </button>
-              </div>
-
-              {/* List notes */}
-              <div className="mt-3 divide-y divide-slate-800/60 max-h-48 overflow-y-auto">
-                {timelineQuery.data?.length === 0 ? (
-                  <p className="py-2 text-center text-xs text-slate-500">هنوز یادداشتی ثبت نشده است.</p>
-                ) : (
-                  timelineQuery.data?.map((entry) => (
-                    <div key={entry.id} className="py-2 flex items-start justify-between gap-2 text-xs">
-                      <div>
-                        <p className="text-slate-200 font-medium leading-relaxed">{entry.note}</p>
-                        <span className="text-[11px] text-slate-500">
-                          {formatPersianDateTime(entry.createdAt)}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => deleteLineMutation.mutate(entry.id)}
-                        className="text-slate-500 hover:text-rose-400 p-1 transition-colors"
-                        title="حذف یادداشت"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+            <TaskCommentThread taskId={task.id} jiraKey={task.jiraKey} />
           </div>
         </div>
+
+        {error && <p className="mt-4 text-xs text-rose-300">{error}</p>}
 
         {/* Footer Actions */}
         <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between">

@@ -1,3 +1,8 @@
+function parseDateInput(dateString: string) {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateString)) return new Date(`${dateString}T12:00:00`)
+  return new Date(dateString)
+}
+
 export function todayIso() {
   const now = new Date()
   const offset = now.getTimezoneOffset() * 60_000
@@ -21,13 +26,13 @@ export function daysAgoIso(days: number) {
 export function formatPersianDate(dateString?: string | null): string {
   if (!dateString) return ''
   try {
-    const d = new Date(dateString)
+    const d = parseDateInput(dateString)
     if (isNaN(d.getTime())) return dateString
     return new Intl.DateTimeFormat('fa-IR', {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
-      year: 'numeric'
+      year: 'numeric',
     }).format(d)
   } catch {
     return dateString
@@ -37,11 +42,11 @@ export function formatPersianDate(dateString?: string | null): string {
 export function formatPersianDateShort(dateString?: string | null): string {
   if (!dateString) return ''
   try {
-    const d = new Date(dateString)
+    const d = parseDateInput(dateString)
     if (isNaN(d.getTime())) return dateString
     return new Intl.DateTimeFormat('fa-IR', {
       day: 'numeric',
-      month: 'short'
+      month: 'short',
     }).format(d)
   } catch {
     return dateString
@@ -57,7 +62,7 @@ export function formatPersianDateTime(dateString?: string | null): string {
       day: 'numeric',
       month: 'short',
       hour: '2-digit',
-      minute: '2-digit'
+      minute: '2-digit',
     }).format(d)
   } catch {
     return dateString

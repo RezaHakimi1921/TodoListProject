@@ -128,6 +128,16 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
               {task.energyType === 'Deep' ? 'تمرکز عمیق' : 'کار سبک'}
             </span>
 
+            <span
+              className={`inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border ${
+                task.ownership === 'Other'
+                  ? 'bg-violet-500/10 text-violet-300 border-violet-500/20'
+                  : 'bg-sky-500/10 text-sky-300 border-sky-500/20'
+              }`}
+            >
+              {task.ownership === 'Other' ? 'دیگری' : 'من'}
+            </span>
+
             {/* Status Dropdown */}
             <div className="relative">
               <button

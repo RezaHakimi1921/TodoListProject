@@ -1,8 +1,12 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Clock, Plus, Trash2 } from 'lucide-react'
+import { getJiraIssueStatus, isJiraWorklogEdited, jiraWorklogMinutes, listJiraIssueWorklogs } from '../api/jira'
+import { getTask } from '../api/tasks'
 import { captureWorkLog, deleteWorkLog, listEntityWorkLogs } from '../api/workLogs'
 import { formatPersianDateTime, todayIso } from '../lib/dates'
+import { WorkLogDuration } from './WorkLogDuration'
+import { WorkLogTags } from './WorkLogTags'
 
 interface Props {
   kind: 'task' | 'problem'
@@ -21,6 +25,26 @@ export function EntityWorkLogs({ kind, id }: Props) {
     enabled: Number.isFinite(id),
   })
 
+  const taskQuery = useQuery({
+    queryKey: ['task', id],
+    queryFn: () => getTask(id),
+    enabled: kind === 'task' && Number.isFinite(id),
+  })
+
+  const jiraKey = kind === 'task' ? taskQuery.data?.jiraKey : null
+
+  const jiraStatusQuery = useQuery({
+    queryKey: ['jira-status', jiraKey],
+    queryFn: () => getJiraIssueStatus(jiraKey!),
+    enabled: Boolean(jiraKey),
+  })
+
+  const jiraLogsQuery = useQuery({
+    queryKey: ['jira-worklogs', jiraKey],
+    queryFn: () => listJiraIssueWorklogs(jiraKey!),
+    enabled: Boolean(jiraKey),
+  })
+
   const addMutation = useMutation({
     mutationFn: () =>
       captureWorkLog({
@@ -35,6 +59,7 @@ export function EntityWorkLogs({ kind, id }: Props) {
       setShowAdd(false)
       void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
       void queryClient.invalidateQueries({ queryKey: ['worklogs', kind, id] })
+      void queryClient.invalidateQueries({ queryKey: ['jira-worklogs'] })
     },
   })
 
@@ -57,6 +82,12 @@ export function EntityWorkLogs({ kind, id }: Props) {
       return day === today
     })
     .reduce((sum, entry) => sum + entry.durationMinutes, 0)
+  const jiraById = new Map((jiraLogsQuery.data ?? []).map((log) => [String(log.id), log]))
+  const editedIds = new Set(
+    (jiraLogsQuery.data ?? [])
+      .filter((log) => isJiraWorklogEdited(log))
+      .map((log) => String(log.id)),
+  )
 
   return (
     <div className="rounded-2xl border border-[#262f44] bg-[#141824] p-4">
@@ -67,6 +98,11 @@ export function EntityWorkLogs({ kind, id }: Props) {
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
             {todayMinutes === totalMinutes ? `${totalMinutes} دقیقه` : `${todayMinutes} امروز / ${totalMinutes} کل`}
           </span>
+          {jiraKey && jiraStatusQuery.data && (
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/[0.04] text-slate-300 border border-white/10">
+              Jira: {jiraStatusQuery.data}
+            </span>
+          )}
         </div>
         <button
           type="button"
@@ -126,12 +162,20 @@ export function EntityWorkLogs({ kind, id }: Props) {
         ) : (
           entries.map((entry) => (
             <div key={entry.id} className="py-2 flex items-center justify-between text-xs">
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-slate-200 font-medium">{entry.description}</span>
-                <span className="text-slate-500 text-[11px] mr-2">({formatPersianDateTime(entry.createdAt)})</span>
+                <WorkLogTags
+                  source={entry.source}
+                  jiraEdited={Boolean(entry.jiraWorklogId && editedIds.has(String(entry.jiraWorklogId)))}
+                />
+                <span className="text-slate-500 text-[11px]">({formatPersianDateTime(entry.createdAt)})</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-mono text-amber-300 font-semibold">{entry.durationMinutes}m</span>
+                                <WorkLogDuration
+                  localMinutes={entry.durationMinutes}
+                  jiraMinutes={entry.jiraWorklogId ? jiraWorklogMinutes(jiraById.get(String(entry.jiraWorklogId)) ?? { timeSpentSeconds: 0 }) : null}
+                  edited={Boolean(entry.jiraWorklogId && editedIds.has(String(entry.jiraWorklogId)))}
+                />
                 <button
                   type="button"
                   onClick={() => deleteMutation.mutate(entry.id)}

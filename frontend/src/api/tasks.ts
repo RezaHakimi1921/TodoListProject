@@ -1,5 +1,12 @@
-import { api } from './client'
-import type { EnergyType, SimilarTask, TaskItem, TaskStatus, TimelineEntry } from '../types'
+import { api, ApiError } from './client'
+import { todayIso } from '../lib/dates'
+import type { EnergyType, SimilarTask, TaskItem, TaskOwnership, TaskStatus, TimelineEntry } from '../types'
+import { upsertDailyLog } from './dailyLogs'
+import { clearFocus } from './focus'
+
+function asOwnership(value: unknown): TaskOwnership {
+  return value === 'Other' ? 'Other' : 'Mine'
+}
 
 const camel = (row: Record<string, unknown>): TaskItem => ({
   id: Number(row.id),
@@ -20,6 +27,7 @@ const camel = (row: Record<string, unknown>): TaskItem => ({
   checklistDone: Number(row.checklistDone ?? 0),
   jiraKey: (row.jiraKey as string | null) ?? null,
   jiraUrl: (row.jiraUrl as string | null) ?? null,
+  ownership: asOwnership(row.ownership),
 })
 
 export interface TaskFilters {
@@ -57,6 +65,25 @@ export function rolloverDay(note?: string) {
   return api.post<{ rolledOverCount: number; message: string }>('/api/tasks/rollover', { note })
 }
 
+export async function closeWorkday(note?: string) {
+  try {
+    return await rolloverDay(note)
+  } catch (err) {
+    if (!(err instanceof ApiError) && !(err instanceof Error)) throw err
+    const text = note?.trim() || 'پایان روز کاری'
+    await upsertDailyLog(todayIso(), text)
+    try {
+      await clearFocus()
+    } catch {
+      /* focus may already be empty */
+    }
+    return {
+      rolledOverCount: 0,
+      message: 'گزارش روز ثبت شد.',
+    }
+  }
+}
+
 export function getTask(id: number) {
   return api.get<Record<string, unknown>>(`/api/tasks/${id}`).then(camel)
 }
@@ -67,7 +94,13 @@ export function createTask(input: { title: string; energyType: EnergyType; tags?
 
 export function updateTask(
   id: number,
-  input: { title: string; status: TaskStatus; energyType: EnergyType; tags?: string },
+  input: {
+    title: string
+    status: TaskStatus
+    energyType: EnergyType
+    tags?: string
+    ownership?: TaskOwnership
+  },
 ) {
   return api.put<Record<string, unknown>>(`/api/tasks/${id}`, input).then(camel)
 }

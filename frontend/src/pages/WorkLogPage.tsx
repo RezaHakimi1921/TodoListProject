@@ -13,7 +13,10 @@ import {
   ChevronRight,
   ChevronLeft
 } from 'lucide-react'
+import { isJiraWorklogEdited, jiraWorklogMinutes, listJiraIssueWorklogs } from '../api/jira'
 import { captureWorkLog, deleteWorkLog, getWorkLogSummary, listWorkLogs } from '../api/workLogs'
+import { WorkLogDuration } from '../components/WorkLogDuration'
+import { WorkLogTags } from '../components/WorkLogTags'
 import { listTasks } from '../api/tasks'
 import { todayIso, formatPersianDate, formatPersianDateTime } from '../lib/dates'
 import type { WorkLogSource } from '../types'
@@ -44,6 +47,27 @@ export function WorkLogPage() {
     queryFn: () => listTasks(),
   })
 
+  const jiraKeys = [...new Set((tasksQuery.data ?? []).map((task) => task.jiraKey).filter(Boolean))] as string[]
+  const jiraEditsQuery = useQuery({
+    queryKey: ['jira-worklogs-edited', ...jiraKeys],
+    queryFn: async () => {
+      const minutes: Record<string, number> = {}
+      const edited: string[] = []
+      await Promise.all(
+        jiraKeys.map(async (key) => {
+          const rows = await listJiraIssueWorklogs(key)
+          for (const row of rows) {
+            minutes[String(row.id)] = jiraWorklogMinutes(row)
+            if (isJiraWorklogEdited(row)) edited.push(String(row.id))
+          }
+        }),
+      )
+      return { edited, minutes }
+    },
+    enabled: jiraKeys.length > 0,
+  })
+  const editedJiraIds = new Set(jiraEditsQuery.data?.edited ?? [])
+  const jiraMinutesById = jiraEditsQuery.data?.minutes ?? {}
   const addMutation = useMutation({
     mutationFn: () =>
       captureWorkLog({
@@ -266,7 +290,7 @@ export function WorkLogPage() {
                 <div key={log.id} className="py-3.5 flex flex-wrap items-center justify-between gap-3 text-xs">
                   <div className="flex items-center gap-3">
                     <span className="px-2.5 py-1 rounded-xl bg-amber-500/10 text-amber-300 font-mono font-bold border border-amber-500/20 text-xs">
-                      {log.durationMinutes}m
+                      <WorkLogDuration localMinutes={log.durationMinutes} jiraMinutes={log.jiraWorklogId ? jiraMinutesById[String(log.jiraWorklogId)] : null} edited={Boolean(log.jiraWorklogId && editedJiraIds.has(String(log.jiraWorklogId)))} />
                     </span>
                     <div>
                       <p className="text-slate-100 font-semibold">{log.description}</p>
@@ -282,9 +306,10 @@ export function WorkLogPage() {
                     <span className="text-slate-500 font-mono text-[11px]">
                       {formatPersianDateTime(log.createdAt)}
                     </span>
-                    <span className="px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700/60 text-slate-400 text-[10px]">
-                      {log.source === 'Timer' ? 'تایمر پاپ‌آپ' : 'ثبت دستی'}
-                    </span>
+                    <WorkLogTags
+                      source={log.source}
+                      jiraEdited={Boolean(log.jiraWorklogId && editedJiraIds.has(String(log.jiraWorklogId)))}
+                    />
                     <button
                       type="button"
                       onClick={() => deleteMutation.mutate(log.id)}
