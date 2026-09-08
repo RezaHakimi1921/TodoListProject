@@ -68,9 +68,22 @@ export function PastDaysMenu() {
       </button>
       {open && (
         <div className="absolute top-full right-0 mt-1 z-40 w-72 max-h-80 overflow-y-auto rounded-xl border border-white/10 bg-[#12151e] p-2 shadow-xl">
-          {groups.length === 0 && (
+          {daysQuery.isError && (
+            <p className="px-3 py-4 text-xs text-rose-300">لیست روزها لود نشد. صفحه را رفرش کن.</p>
+          )}
+          {groups.length === 0 && !daysQuery.isError && (
             <p className="px-3 py-4 text-xs text-slate-500">هنوز روز گذشته‌ای ثبت نشده.</p>
           )}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              navigate({ pathname: '/', search: '?date=all' })
+            }}
+            className="mb-2 flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]"
+          >
+            <span>همه روزها</span>
+          </button>
           {groups.map(([month, rows]) => (
             <section key={month} className="mb-2">
               <p className="px-2 py-1 text-[10px] tracking-wide text-amber-300/80">{monthLabel(month)}</p>
@@ -81,7 +94,7 @@ export function PastDaysMenu() {
                     type="button"
                     onClick={() => {
                       setOpen(false)
-                      navigate(`/?date=${row.date}`)
+                      navigate({ pathname: '/', search: `?date=${row.date}` })
                     }}
                     className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs ${
                       selected === row.date ? 'bg-ember/20 text-amber-100' : 'bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]'

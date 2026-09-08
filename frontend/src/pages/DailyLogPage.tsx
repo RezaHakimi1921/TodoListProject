@@ -7,11 +7,10 @@ import {
   Check, 
   ChevronRight, 
   ChevronLeft, 
-  ListCheck, 
   Sparkles,
   Trash2
 } from 'lucide-react'
-import { deleteDailyLog, getDailyLog, getRelatedTasks, listDailyLogs, upsertDailyLog } from '../api/dailyLogs'
+import { deleteDailyLog, getDailyLog, listDailyLogs, upsertDailyLog } from '../api/dailyLogs'
 import { todayIso, formatPersianDate, formatPersianDateTime } from '../lib/dates'
 
 export function DailyLogPage() {
@@ -28,11 +27,6 @@ export function DailyLogPage() {
   const historyQuery = useQuery({
     queryKey: ['dailylogs', 'list'],
     queryFn: () => listDailyLogs(),
-  })
-
-  const relatedTasksQuery = useQuery({
-    queryKey: ['relatedTasks', date],
-    queryFn: () => getRelatedTasks(date),
   })
 
   useEffect(() => {
@@ -64,8 +58,6 @@ export function DailyLogPage() {
     setDate(d.toISOString().slice(0, 10))
   }
 
-  const relatedTasks = relatedTasksQuery.data ?? []
-
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -80,7 +72,7 @@ export function DailyLogPage() {
             </h1>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-slate-400">
-            ثبت دستاوردها، درس‌های آموخته‌شده و نکات کلیدی برای ارزیابی عملکرد شخصی
+            فقط یادداشت‌هایی که می‌خواهی در ذهنت بماند یا یادآوری باشد. کارها و لاگ‌ها اینجا نمی‌آیند.
           </p>
         </div>
 
@@ -167,26 +159,6 @@ export function DailyLogPage() {
               </button>
             </div>
           </div>
-
-          {/* Related Tasks for today */}
-          {relatedTasks.length > 0 && (
-            <div className="rounded-2xl border border-[#212738] bg-[#141824] p-4">
-              <h4 className="text-xs font-bold text-slate-300 mb-3 flex items-center gap-2">
-                <ListCheck className="w-4 h-4 text-emerald-400" />
-                کارهایی که در این روز فعال بودند یا تغییر کردند:
-              </h4>
-              <div className="space-y-2">
-                {relatedTasks.map((t) => (
-                  <div key={t.id} className="p-2.5 rounded-xl bg-[#0f121a] border border-slate-800 text-xs flex items-center justify-between">
-                    <span className="text-slate-200">{t.title}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-400">
-                      {t.status === 'Done' ? 'تکمیل شده' : 'در جریان'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
         {/* History Sidebar */}

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TaskOS Work Log",
-  "version": "0.5.2",
-  "description": "Work Log و فرم ویندوز وقتی آدرس Jira شامل کلید تکت باشد.",
+  "version": "0.5.8",
+  "description": "Work Log و فرم ویندوز وقتی آدرس Jira شامل کلید تیکت باشد.",
   "permissions": ["alarms", "storage", "notifications", "tabs", "webNavigation"],
   "host_permissions": [
     "http://127.0.0.1:5088/*",

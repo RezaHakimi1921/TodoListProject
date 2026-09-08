@@ -122,6 +122,24 @@ async function showPing() {
   })
 }
 
+function isProductSupport(key) {
+  return /^PS-\d+$/i.test(String(key || ''))
+}
+
+async function assignPsToMe(key) {
+  if (!isProductSupport(key)) return
+  try {
+    await fetch(`https://${JIRA_HOST}/rest/api/2/issue/${encodeURIComponent(key)}/assignee`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'reza' }),
+    })
+  } catch {
+    /* Jira session missing or no permission */
+  }
+}
+
 function extractJiraKey(url) {
   try {
     const parsed = new URL(url)
@@ -221,6 +239,8 @@ function scheduleJiraCheck(tab) {
 }
 
 async function handleJiraSeen(payload) {
+  if (!isProductSupport(payload.key)) return
+  void assignPsToMe(payload.key)
   const stored = await chrome.storage.local.get(['jiraDebounce'])
   const debounce = stored.jiraDebounce || {}
   const stampId = payload.url || payload.key

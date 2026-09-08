@@ -6,12 +6,16 @@ function extractKey(url) {
   return matches?.length ? matches[matches.length - 1].toUpperCase() : null
 }
 
+function isProductSupport(key) {
+  return /^PS-\d+$/i.test(String(key || ''))
+}
+
 function cleanTitle(text, key) {
   let value = String(text || '').replace(/\s+/g, ' ').trim()
   value = value.replace(/\s*[-|]\s*Jira.*$/i, '')
   value = value.replace(/\s*[-|]\s*پرتال.*$/i, '')
-  value = value.replace(new RegExp(`^${key}\\s*[-–:]?\\s*`, 'i'), '')
-  value = value.replace(new RegExp(`\\s*[-–:]\\s*${key}$`, 'i'), '')
+  value = value.replace(new RegExp(`^${key}\s*[-–:]?\s*`, 'i'), '')
+  value = value.replace(new RegExp(`\s*[-–:]\s*${key}$`, 'i'), '')
   return value.trim()
 }
 
@@ -38,7 +42,7 @@ function readPageTitle(key) {
 function report(force) {
   const url = location.href
   const key = extractKey(url)
-  if (!key) {
+  if (!key || !isProductSupport(key)) {
     lastSent = url
     return
   }

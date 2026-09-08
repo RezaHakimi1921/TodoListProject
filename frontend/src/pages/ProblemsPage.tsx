@@ -104,6 +104,9 @@ export function ProblemsPage() {
             ایجاد مسئله
           </button>
         </div>
+        {createMutation.isError && (
+          <p className="mt-2 text-xs text-rose-400 font-medium">{(createMutation.error as Error).message}</p>
+        )}
       </div>
 
       {/* Problems List */}
@@ -120,13 +123,16 @@ export function ProblemsPage() {
           problems.map((problem) => {
             const isChosen = problem.status === 'Chosen'
             const isValidated = problem.status === 'Validated'
+            const isResolved = problem.status === 'Resolved'
             const chosenOption = problem.options.find((o) => o.id === problem.chosenOptionId)
 
             return (
               <div
                 key={problem.id}
                 className={`rounded-2xl border p-5 transition-all shadow-lg flex flex-col justify-between ${
-                  isValidated
+                  isResolved
+                    ? 'border-sky-500/30 bg-sky-500/[0.04]'
+                    : isValidated
                     ? 'border-emerald-500/30 bg-emerald-500/[0.03]'
                     : isChosen
                     ? 'border-amber-500/30 bg-amber-500/[0.03]'
@@ -137,14 +143,18 @@ export function ProblemsPage() {
                   <div className="flex items-center justify-between gap-2 mb-2">
                     <span
                       className={`inline-flex items-center gap-1 text-[11px] font-bold px-2.5 py-0.5 rounded-full ${
-                        isValidated
+                        isResolved
+                          ? 'bg-sky-500/20 text-sky-200 border border-sky-500/40'
+                          : isValidated
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
                           : isChosen
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                           : 'bg-slate-800 text-slate-300 border border-slate-700'
                       }`}
                     >
-                      {isValidated ? (
+                      {isResolved ? (
+                        <CheckCircle2 className="w-3 h-3" />
+                      ) : isValidated ? (
                         <Award className="w-3 h-3" />
                       ) : isChosen ? (
                         <CheckCircle2 className="w-3 h-3" />

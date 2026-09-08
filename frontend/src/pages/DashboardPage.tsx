@@ -23,8 +23,9 @@ import { QuickAddTask } from '../components/QuickAddTask'
 import { TaskCard } from '../components/TaskCard'
 import { TaskEditorDrawer } from '../components/TaskEditorDrawer'
 import { AgingModal } from '../components/AgingModal'
+import { NowWorkingBanner } from '../components/NowWorkingBanner'
 import { todayIso, yesterdayIso, formatPersianDate, formatPersianDateShort } from '../lib/dates'
-import type { TaskItem, TaskStatus, StuckReason } from '../types'
+import { isFocusPaused, type TaskItem, type TaskStatus, type StuckReason } from '../types'
 
 export function DashboardPage() {
   const queryClient = useQueryClient()
@@ -67,7 +68,7 @@ export function DashboardPage() {
 
   const agingMutation = useMutation({
     mutationFn: ({ id, reason }: { id: number; reason: StuckReason }) => {
-      const isDoneReason = reason === 'دیگر اولویت ندارد یا منتفی شد (اتمام و بستن)'
+      const isDoneReason = reason === 'مهم نیست دیگه'
       return updateTaskStatus(id, {
         status: isDoneReason ? 'Done' : 'Stuck',
         stuckReason: isDoneReason ? undefined : reason,
@@ -107,7 +108,8 @@ export function DashboardPage() {
   const totalCount = tasks.length
   const doneCount = tasks.filter((t) => t.status === 'Done').length
   const doingCount = tasks.filter((t) => t.status === 'Doing').length
-  const stuckCount = tasks.filter((t) => t.status === 'Stuck').length
+  const pausedCount = tasks.filter((t) => isFocusPaused(t)).length
+  const stuckCount = tasks.filter((t) => t.status === 'Stuck' && !isFocusPaused(t)).length
   const openCount = tasks.filter((t) => t.status === 'Open').length
   const rolledOverCount = tasks.filter((t) => t.rolledOver && t.status !== 'Done').length
   const completionPercentage = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0
@@ -115,13 +117,19 @@ export function DashboardPage() {
   // Filtered tasks
   const filteredTasks = useMemo(() => {
     return tasks.filter((task) => {
-      if (selectedStatus !== 'all' && task.status !== selectedStatus) return false
+      if (selectedStatus === 'Paused') return isFocusPaused(task)
+      if (selectedStatus === 'Stuck' && isFocusPaused(task)) return false
+      if (selectedStatus !== 'all' && selectedStatus !== 'Paused' && task.status !== selectedStatus) return false
       if (selectedEnergy !== 'all' && task.energyType !== selectedEnergy) return false
       if (searchQuery.trim()) {
         const query = searchQuery.trim().toLowerCase()
+        const key = (task.jiraKey ?? '').toLowerCase()
+        const url = (task.jiraUrl ?? '').toLowerCase()
+        const digits = query.replace(/^[a-z]+-/, '')
         const matchTitle = task.title.toLowerCase().includes(query)
         const matchTag = task.tags.some((t) => t.toLowerCase().includes(query))
-        if (!matchTitle && !matchTag) return false
+        const matchJira = key.includes(query) || url.includes(query) || (digits.length >= 3 && (key.endsWith('-' + digits) || key.endsWith(digits)))
+        if (!matchTitle && !matchTag && !matchJira) return false
       }
       return true
     })
@@ -132,6 +140,8 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-7 max-w-6xl mx-auto">
+      <NowWorkingBanner />
+
       {/* 1. Day Partitioning & Motivation Header (Clean Linear Aesthetic) */}
       <section 
         id="dashboard-hero-section"
@@ -265,6 +275,7 @@ export function DashboardPage() {
             { key: 'all', label: 'همه', count: totalCount },
             { key: 'Open', label: 'باز', count: openCount },
             { key: 'Doing', label: 'در حال انجام', count: doingCount },
+            { key: 'Paused', label: 'متوقف‌شده', count: pausedCount },
             { key: 'Stuck', label: 'گیر کرده', count: stuckCount },
             { key: 'Done', label: 'تکمیل شده', count: doneCount },
           ].map((item) => (

@@ -8,15 +8,18 @@ import {
   Trash2, 
   Settings, 
   Zap, 
-  Sparkles
+  Sparkles,
+  BarChart3
 } from 'lucide-react'
 import { listTrash } from '../api/trash'
 import { listTasks } from '../api/tasks'
 import { WorkLogPrompt } from './WorkLogPrompt'
 import { PastDaysMenu } from './PastDaysMenu'
 import { formatPersianDate } from '../lib/dates'
+import { useFocusTaskStatus } from '../hooks/useFocusTaskStatus'
 
 export function Layout() {
+  useFocusTaskStatus()
   const trashQuery = useQuery({
     queryKey: ['trash'],
     queryFn: () => listTrash(),
@@ -36,6 +39,7 @@ export function Layout() {
   const navItems = [
     { to: '/', label: 'کارهای امروز', icon: CheckSquare, end: true },
     { to: '/worklogs', label: 'ثبت کار و زمان', icon: Clock },
+    { to: '/reports', label: 'گزارش', icon: BarChart3 },
     { to: '/problems', label: 'استودیوی مسئله', icon: HelpCircle },
     { to: '/dailylogs', label: 'دفترچه یادگیری', icon: BookOpen },
     { 

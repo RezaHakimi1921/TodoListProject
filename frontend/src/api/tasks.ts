@@ -18,6 +18,8 @@ const camel = (row: Record<string, unknown>): TaskItem => ({
   rolledOverFrom: (row.rolledOverFrom as string | null) ?? null,
   checklistTotal: Number(row.checklistTotal ?? 0),
   checklistDone: Number(row.checklistDone ?? 0),
+  jiraKey: (row.jiraKey as string | null) ?? null,
+  jiraUrl: (row.jiraUrl as string | null) ?? null,
 })
 
 export interface TaskFilters {

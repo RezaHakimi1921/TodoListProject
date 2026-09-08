@@ -1,5 +1,5 @@
 import { Clock, HelpCircle, X } from 'lucide-react'
-import { STUCK_REASONS, type StuckReason, type TaskItem } from '../types'
+import { STUCK_REASON_LABEL, STUCK_REASONS, type StuckReason, type TaskItem } from '../types'
 
 interface Props {
   task: TaskItem | null
@@ -59,8 +59,8 @@ export function AgingModal({ task, onClose, onChoose }: Props) {
               onClick={() => onChoose(reason)}
               className="w-full text-right p-3.5 rounded-xl border border-[#262f44] bg-[#181d2c] hover:bg-[#1e2538] hover:border-amber-500/50 transition-all text-sm text-slate-200 font-medium flex items-center justify-between group"
             >
-              <span>{reason}</span>
-              {reason === 'دیگر اولویت ندارد یا منتفی شد (اتمام و بستن)' ? (
+              <span>{STUCK_REASON_LABEL[reason]}</span>
+              {reason === 'مهم نیست دیگه' ? (
                 <span className="text-xs px-2 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">
                   بستن و تکمیل
                 </span>

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Clock, Plus, Trash2 } from 'lucide-react'
 import { captureWorkLog, deleteWorkLog, listEntityWorkLogs } from '../api/workLogs'
-import { formatPersianDateTime } from '../lib/dates'
+import { formatPersianDateTime, todayIso } from '../lib/dates'
 
 interface Props {
   kind: 'task' | 'problem'
@@ -49,6 +49,14 @@ export function EntityWorkLogs({ kind, id }: Props) {
   const data = logsQuery.data
   const totalMinutes = data?.totalMinutes ?? 0
   const entries = data?.entries ?? []
+  const today = todayIso()
+  const todayMinutes = entries
+    .filter((entry) => {
+      const local = new Date(entry.createdAt)
+      const day = new Date(local.getTime() - local.getTimezoneOffset() * 60_000).toISOString().slice(0, 10)
+      return day === today
+    })
+    .reduce((sum, entry) => sum + entry.durationMinutes, 0)
 
   return (
     <div className="rounded-2xl border border-[#262f44] bg-[#141824] p-4">
@@ -57,7 +65,7 @@ export function EntityWorkLogs({ kind, id }: Props) {
           <Clock className="w-4 h-4 text-amber-400" />
           <h4 className="text-sm font-bold text-slate-200">زمان‌های ثبت‌شده</h4>
           <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
-            {totalMinutes} دقیقه
+            {todayMinutes === totalMinutes ? `${totalMinutes} دقیقه` : `${todayMinutes} امروز / ${totalMinutes} کل`}
           </span>
         </div>
         <button

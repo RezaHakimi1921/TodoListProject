@@ -8,6 +8,7 @@ export interface WorkFocus {
   problemId: number | null
   startedAt: string | null
   updatedAt: string | null
+  isResting: boolean
 }
 
 function camel(row: Record<string, unknown>): WorkFocus {
@@ -18,6 +19,7 @@ function camel(row: Record<string, unknown>): WorkFocus {
     problemId: row.problemId == null ? null : Number(row.problemId),
     startedAt: (row.startedAt as string | null) ?? null,
     updatedAt: (row.updatedAt as string | null) ?? null,
+    isResting: Boolean(row.isResting),
   }
 }
 
@@ -53,4 +55,12 @@ export function finishFocus(
 
 export function clearFocus() {
   return api.delete('/api/focus').then(() => getFocus())
+}
+
+export function startRest() {
+  return api.post<Record<string, unknown>>('/api/focus/rest', {}).then(camel)
+}
+
+export function endRest() {
+  return api.post<Record<string, unknown>>('/api/focus/rest/end', {}).then(camel)
 }

@@ -4,13 +4,26 @@ export type WorkLogSource = 'Timer' | 'Extension' | 'Manual' | 'Break'
 export type ProblemStatus = 'Exploring' | 'Chosen' | 'Validated'
 
 export const STUCK_REASONS = [
-  'منتظر پاسخ یا اقدام شخص دیگری هستم',
-  'کار بزرگ و سنگین است و نیاز به خرد کردن دارد',
-  'فراموش شده بود یا اولویت دیگری پیش آمد',
-  'دیگر اولویت ندارد یا منتفی شد (اتمام و بستن)',
+  'منتظر کسی‌ام',
+  'یادم رفت',
+  'سخته',
+  'مهم نیست دیگه',
 ] as const
 
 export type StuckReason = (typeof STUCK_REASONS)[number]
+
+export const STUCK_REASON_LABEL: Record<StuckReason, string> = {
+  'منتظر کسی‌ام': 'منتظر پاسخ یا اقدام شخص دیگری هستم',
+  'یادم رفت': 'فراموش شده بود یا اولویت دیگری پیش آمد',
+  'سخته': 'کار بزرگ و سنگین است و نیاز به خرد کردن دارد',
+  'مهم نیست دیگه': 'دیگر اولویت ندارد یا منتفی شد (اتمام و بستن)',
+}
+
+export const FOCUS_PAUSED_REASON: StuckReason = 'یادم رفت'
+
+export function isFocusPaused(task: { status: TaskStatus; stuckReason?: string | null }) {
+  return task.status === 'Stuck' && task.stuckReason === FOCUS_PAUSED_REASON
+}
 
 export interface TaskItem {
   id: number
@@ -29,6 +42,8 @@ export interface TaskItem {
   rolledOverFrom?: string | null
   checklistTotal?: number
   checklistDone?: number
+  jiraKey?: string | null
+  jiraUrl?: string | null
 }
 
 export interface TimelineEntry {
@@ -103,6 +118,11 @@ export const STATUS_LABEL: Record<TaskStatus, string> = {
   Doing: 'در حال انجام',
   Stuck: 'متوقف / گیر کرده',
   Done: 'تکمیل شده',
+}
+
+export function statusLabel(task: { status: TaskStatus; stuckReason?: string | null }) {
+  if (isFocusPaused(task)) return 'در حال انجام متوقف شده'
+  return STATUS_LABEL[task.status]
 }
 
 export const PROBLEM_STATUS_LABEL: Record<ProblemStatus, string> = {

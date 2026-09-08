@@ -12,12 +12,15 @@ import {
   Zap, 
   Feather,
   ChevronDown,
-  RotateCcw
+  RotateCcw,
+  ExternalLink
 } from 'lucide-react'
 import { updateTaskStatus, deleteTask } from '../api/tasks'
 import { setFocus } from '../api/focus'
 import { useTrashConfirm } from './ConfirmProvider'
 import type { TaskItem, TaskStatus } from '../types'
+import { FOCUS_PAUSED_REASON, isFocusPaused, statusLabel } from '../types'
+import { taskJiraKey, taskJiraUrl } from '../lib/jira'
 
 interface Props {
   key?: string | number
@@ -32,8 +35,9 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
   const [showStatusMenu, setShowStatusMenu] = useState(false)
 
   const isDone = task.status === 'Done'
+  const isPaused = isFocusPaused(task)
   const isDoing = task.status === 'Doing'
-  const isStuck = task.status === 'Stuck'
+  const isStuck = task.status === 'Stuck' && !isPaused
 
   const statusMutation = useMutation({
     mutationFn: (newStatus: TaskStatus) => updateTaskStatus(task.id, { status: newStatus }),
@@ -48,8 +52,8 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
       setFocus({
         description: task.title,
         taskId: task.id,
-        durationMinutes: 15,
-        log: true,
+        durationMinutes: 0,
+        log: false,
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['focus'] })
@@ -133,6 +137,8 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
                 className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded border transition-colors ${
                   isDoing
                     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                    : isPaused
+                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                     : isStuck
                     ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
                     : isDone
@@ -140,15 +146,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
                     : 'bg-white/[0.03] text-slate-300 border-white/[0.08] hover:border-white/20'
                 }`}
               >
-                <span>
-                  {task.status === 'Open'
-                    ? 'باز'
-                    : task.status === 'Doing'
-                    ? 'در حال انجام'
-                    : task.status === 'Stuck'
-                    ? 'متوقف شده'
-                    : 'تکمیل شد'}
-                </span>
+                <span>{statusLabel(task)}</span>
                 <ChevronDown className="w-2.5 h-2.5 opacity-50" />
               </button>
 
@@ -173,7 +171,18 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => statusMutation.mutate('Stuck')}
+                    onClick={() =>
+                      updateTaskStatus(task.id, { status: 'Stuck', stuckReason: FOCUS_PAUSED_REASON }).then(() =>
+                        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+                      )
+                    }
+                    className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-amber-300 hover:bg-amber-500/10 transition-colors font-medium"
+                  >
+                    در حال انجام متوقف شده
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => updateTaskStatus(task.id, { status: 'Stuck', stuckReason: 'سخته' }).then(() => queryClient.invalidateQueries({ queryKey: ['tasks'] }))}
                     className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-rose-400 hover:bg-rose-500/10 transition-colors font-medium"
                   >
                     متوقف / گیر کرده
@@ -226,6 +235,19 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
             {task.title}
           </h3>
 
+          {taskJiraUrl(task) && (
+            <a
+              href={taskJiraUrl(task)!}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => event.stopPropagation()}
+              className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-sky-300 hover:text-sky-100"
+            >
+              <ExternalLink className="w-3 h-3" />
+              {taskJiraKey(task)}
+            </a>
+          )}
+
           {(task.checklistTotal ?? 0) > 0 && (
             <p className="mt-1.5 text-[11px] text-slate-400">
               {task.checklistDone ?? 0} از {task.checklistTotal} انجام شد
@@ -243,7 +265,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
           {/* Tags */}
           {task.tags && task.tags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
-              {task.tags.map((tag) => (
+              {task.tags.filter((tag) => tag !== 'focus-paused').map((tag) => (
                 <span
                   key={tag}
                   className="rounded bg-white/[0.03] border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-slate-400 font-mono"
