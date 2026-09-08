@@ -16,6 +16,7 @@ import { useTrashConfirm } from './ConfirmProvider'
 import { EntityWorkLogs } from './EntityWorkLogs'
 import { TaskChecklist } from './TaskChecklist'
 import { TaskCommentThread } from './TaskCommentThread'
+import { TagChipsEditor } from './TagChips'
 import { TaskOwnershipToggle } from './TaskOwnershipToggle'
 import { STUCK_REASONS, type EnergyType, type TaskItem, type TaskOwnership, type TaskStatus } from '../types'
 
@@ -53,7 +54,7 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
         title: title.trim(),
         status,
         energyType,
-        tags,
+        tags: tags.split(/[,،]+/).map((item) => item.trim()).filter(Boolean).join(','),
         ownership,
       }),
     onSuccess: () => {
@@ -251,13 +252,7 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
                 <Tag className="w-3.5 h-3.5 text-amber-400" />
                 برچسب‌ها (با کاما جدا کنید)
               </label>
-              <input
-                type="text"
-                value={tags}
-                onChange={(e) => setTags(e.target.value)}
-                placeholder="کدنویسی, گزارش, جلسه..."
-                className="w-full rounded-xl bg-[#0b0e16] border border-[#2b354d] px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-              />
+              <TagChipsEditor value={tags} onChange={setTags} placeholder="سعید، محمد، جیرا" />
             </div>
 
             <TaskChecklist taskId={task.id} />

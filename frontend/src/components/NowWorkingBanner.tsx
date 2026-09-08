@@ -30,7 +30,9 @@ export function NowWorkingBanner() {
       <p className="text-[10px] font-semibold tracking-wide text-amber-300/90 mb-1">الان روی این کار هستی</p>
       <div className="flex items-center gap-2">
         <Play className="w-4 h-4 text-amber-300 shrink-0 fill-amber-300" />
-        <p className="text-base sm:text-lg font-bold text-white leading-snug break-words">{focus!.description}</p>
+        <p className="text-base sm:text-lg font-bold text-white leading-snug break-words">
+          {task?.title || focus!.description}
+        </p>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-3">
         {focus?.taskId ? (

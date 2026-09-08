@@ -170,8 +170,15 @@ function extractJiraKey(url) {
 function cleanJiraTitle(title, key) {
   let text = String(title || '')
   text = text.replace(/\s*[-|]\s*Jira.*$/i, '')
+  text = text.replace(/\s*[-|]\s*Service project.*$/i, '')
+  text = text.replace(/\s*[-|]\s*پرتال.*$/i, '')
   text = text.replace(new RegExp(`^${key}\\s*[-:]?\\s*`, 'i'), '')
-  return text.trim() || key
+  text = text.replace(new RegExp(`\\s*[-–:]\\s*${key}$`, 'i'), '')
+  text = text.trim()
+  if (!text || /^(service management|task|bug|story|epic|sub-task|subtask|incident|change|problem|support request)$/i.test(text)) {
+    return key
+  }
+  return text
 }
 
 function isJiraHost(url) {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageCircle, Send, Trash2, UserRound } from 'lucide-react'
+import { Globe, Lock, MessageCircle, Trash2, UserRound } from 'lucide-react'
 import { addJiraIssueComment, getJiraIssueThread, isJiraMe, type JiraCommentAuthor } from '../api/jira'
 import { addTimeline, deleteTimeline, listTimeline } from '../api/tasks'
 import { formatPersianDateTime } from '../lib/dates'
@@ -10,6 +10,8 @@ interface Props {
   jiraKey?: string | null
 }
 
+const PRIVATE_PREFIX = '🔒 '
+
 interface ChatItem {
   id: string
   body: string
@@ -17,6 +19,7 @@ interface ChatItem {
   authorName: string
   mine: boolean
   localId?: number
+  privateNote?: boolean
 }
 
 function personName(person?: JiraCommentAuthor | null) {
@@ -47,14 +50,18 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
   })
 
   const items = useMemo<ChatItem[]>(() => {
-    const local = (timelineQuery.data ?? []).map((entry) => ({
-      id: `local-${entry.id}`,
-      body: entry.note,
-      createdAt: entry.createdAt,
-      authorName: 'من',
-      mine: true,
-      localId: entry.id,
-    }))
+    const local = (timelineQuery.data ?? []).map((entry) => {
+      const privateNote = entry.note.startsWith(PRIVATE_PREFIX)
+      return {
+        id: `local-${entry.id}`,
+        body: privateNote ? entry.note.slice(PRIVATE_PREFIX.length) : entry.note,
+        createdAt: entry.createdAt,
+        authorName: privateNote ? 'یادداشت خصوصی' : 'من',
+        mine: true,
+        localId: entry.id,
+        privateNote,
+      }
+    })
     const remote = (jiraQuery.data?.comments ?? []).map((comment) => ({
       id: `jira-${comment.id}`,
       body: displayBody(comment.body),
@@ -70,9 +77,13 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
   }, [items.length])
 
   const sendMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (mode: 'private' | 'jira') => {
       const text = note.trim()
       if (!text) return
+      if (mode === 'private') {
+        await addTimeline(taskId, `${PRIVATE_PREFIX}${text}`)
+        return
+      }
       if (jiraKey) {
         await addJiraIssueComment(jiraKey, text)
         return
@@ -137,14 +148,16 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
               <div
                 dir="rtl"
                 className={`max-w-[85%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
-                  item.mine
-                    ? 'bg-amber-500/15 border border-amber-500/25 text-slate-100 rounded-br-md'
-                    : 'bg-[#1c2233] border border-white/10 text-slate-100 rounded-bl-md'
+                  item.privateNote
+                    ? 'bg-slate-700/40 border border-slate-500/30 text-slate-100 rounded-br-md'
+                    : item.mine
+                      ? 'bg-amber-500/15 border border-amber-500/25 text-slate-100 rounded-br-md'
+                      : 'bg-[#1c2233] border border-white/10 text-slate-100 rounded-bl-md'
                 }`}
               >
                 <div className="mb-1 flex items-center justify-between gap-3">
-                  <span className={`text-[10px] font-semibold ${item.mine ? 'text-amber-300' : 'text-sky-300'}`}>
-                    {item.mine ? 'من' : item.authorName}
+                  <span className={`text-[10px] font-semibold ${item.privateNote ? 'text-slate-300' : item.mine ? 'text-amber-300' : 'text-sky-300'}`}>
+                    {item.mine ? (item.privateNote ? 'یادداشت خصوصی' : 'من') : item.authorName}
                   </span>
                   <span className="text-[10px] text-slate-500">{formatPersianDateTime(item.createdAt)}</span>
                 </div>
@@ -166,7 +179,7 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
         <div ref={endRef} />
       </div>
 
-      <div className="mt-3 flex gap-2" dir="rtl">
+      <div className="mt-3 space-y-2" dir="rtl">
         <input
           type="text"
           value={note}
@@ -174,21 +187,32 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && note.trim()) {
               e.preventDefault()
-              sendMutation.mutate()
+              sendMutation.mutate('private')
             }
           }}
-          placeholder={jiraKey ? 'کامنت برای تیکت جیرا بنویسید...' : 'یادداشت، تصمیم یا پیشرفت جدید بنویسید...'}
-          className="flex-1 rounded-xl bg-[#0b0e16] border border-[#2b354d] px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+          placeholder="یادداشت خصوصی یا کامنت عمومی بنویسید..."
+          className="w-full rounded-xl bg-[#0b0e16] border border-[#2b354d] px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
         />
-        <button
-          type="button"
-          disabled={!note.trim() || sendMutation.isPending}
-          onClick={() => sendMutation.mutate()}
-          className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center gap-1"
-        >
-          <Send className="w-3.5 h-3.5" />
-          <span>ثبت</span>
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={!note.trim() || sendMutation.isPending}
+            onClick={() => sendMutation.mutate('private')}
+            className="px-3 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-slate-100 font-bold text-xs flex items-center gap-1"
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>یادداشت برای خودم</span>
+          </button>
+          <button
+            type="button"
+            disabled={!note.trim() || sendMutation.isPending}
+            onClick={() => sendMutation.mutate('jira')}
+            className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center gap-1"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>{jiraKey ? 'کامنت Jira' : 'کامنت General'}</span>
+          </button>
+        </div>
       </div>
       {error && <p className="mt-2 text-[11px] text-rose-300">{error}</p>}
     </div>

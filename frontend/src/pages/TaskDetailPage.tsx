@@ -19,6 +19,7 @@ import { useTrashConfirm } from '../components/ConfirmProvider'
 import { EntityWorkLogs } from '../components/EntityWorkLogs'
 import { TaskChecklist } from '../components/TaskChecklist'
 import { TaskCommentThread } from '../components/TaskCommentThread'
+import { TagChipsEditor } from '../components/TagChips'
 import { TaskOwnershipToggle } from '../components/TaskOwnershipToggle'
 import { STUCK_REASONS, type EnergyType, type TaskOwnership, type TaskStatus } from '../types'
 
@@ -60,7 +61,7 @@ export function TaskDetailPage() {
         title: title.trim(),
         status,
         energyType,
-        tags,
+        tags: tags.split(/[,،]+/).map((item) => item.trim()).filter(Boolean).join(','),
         ownership,
       }),
     onSuccess: () => {
@@ -77,7 +78,7 @@ export function TaskDetailPage() {
         title: title.trim() || taskQuery.data?.title || '',
         status,
         energyType,
-        tags,
+        tags: tags.split(/[,،]+/).map((item) => item.trim()).filter(Boolean).join(','),
         ownership: next,
       }),
     onSuccess: () => {
@@ -225,12 +226,7 @@ export function TaskDetailPage() {
             <Tag className="w-3.5 h-3.5 text-amber-400" />
             برچسب‌ها (با کاما جدا کنید)
           </label>
-          <input
-            type="text"
-            value={tags}
-            onChange={(e) => setTags(e.target.value)}
-            className="w-full rounded-xl bg-[#0b0e16] border border-[#2b354d] px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-          />
+          <TagChipsEditor value={tags} onChange={setTags} placeholder="سعید، محمد، جیرا" />
         </div>
 
         <div className="flex justify-end pt-2">

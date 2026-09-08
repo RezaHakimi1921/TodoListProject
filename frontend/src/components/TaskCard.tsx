@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
@@ -15,8 +15,9 @@ import {
   RotateCcw,
   ExternalLink
 } from 'lucide-react'
-import { updateTaskStatus, deleteTask } from '../api/tasks'
-import { setFocus } from '../api/focus'
+import { deleteTask, updateTask, updateTaskStatus } from '../api/tasks'
+import { requestTaskFocus, remainingFocusSwitchMs, subscribeFocusSwitch } from '../lib/focusSwitch'
+import { TagChipList } from './TagChips'
 import { useTrashConfirm } from './ConfirmProvider'
 import type { TaskItem, TaskStatus } from '../types'
 import { FOCUS_PAUSED_REASON, isFocusPaused, statusLabel } from '../types'
@@ -33,6 +34,18 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
   const queryClient = useQueryClient()
   const askTrash = useTrashConfirm()
   const [showStatusMenu, setShowStatusMenu] = useState(false)
+  const [switchWait, setSwitchWait] = useState(() => remainingFocusSwitchMs(task.id))
+
+  useEffect(() => {
+    const sync = () => setSwitchWait(remainingFocusSwitchMs(task.id))
+    sync()
+    const interval = window.setInterval(sync, 250)
+    const unsubscribe = subscribeFocusSwitch(sync)
+    return () => {
+      window.clearInterval(interval)
+      unsubscribe()
+    }
+  }, [task.id])
 
   const isDone = task.status === 'Done'
   const isPaused = isFocusPaused(task)
@@ -48,13 +61,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
   })
 
   const focusMutation = useMutation({
-    mutationFn: () =>
-      setFocus({
-        description: task.title,
-        taskId: task.id,
-        durationMinutes: 0,
-        log: false,
-      }),
+    mutationFn: () => requestTaskFocus(task),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['focus'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
@@ -181,11 +188,23 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
                   </button>
                   <button
                     type="button"
-                    onClick={() =>
-                      updateTaskStatus(task.id, { status: 'Stuck', stuckReason: FOCUS_PAUSED_REASON }).then(() =>
-                        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
-                      )
-                    }
+                    onClick={() => {
+                      const original = task.title
+                      void updateTaskStatus(task.id, { status: 'Stuck', stuckReason: FOCUS_PAUSED_REASON })
+                        .then(async (updated) => {
+                          if (updated.title !== original) {
+                            await updateTask(task.id, {
+                              title: original,
+                              status: updated.status,
+                              energyType: updated.energyType,
+                              tags: updated.tags.join(','),
+                              ownership: updated.ownership,
+                            })
+                          }
+                          void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+                          void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+                        })
+                    }}
                     className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-amber-300 hover:bg-amber-500/10 transition-colors font-medium"
                   >
                     در حال انجام متوقف شده
@@ -272,19 +291,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
             </div>
           )}
 
-          {/* Tags */}
-          {task.tags && task.tags.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1">
-              {task.tags.filter((tag) => tag !== 'focus-paused').map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded bg-white/[0.03] border border-white/[0.06] px-1.5 py-0.5 text-[10px] text-slate-400 font-mono"
-                >
-                  #{tag}
-                </span>
-              ))}
-            </div>
-          )}
+          <TagChipList tags={task.tags} />
         </div>
 
         {/* Action Buttons */}
@@ -295,10 +302,14 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
               type="button"
               onClick={() => focusMutation.mutate()}
               disabled={focusMutation.isPending}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] transition-all"
-              title="شروع تمرکز عمیق روی این کار"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] transition-all min-w-8"
+              title={switchWait > 0 ? 'اگر ۳۰ ثانیه روی همین کار بمانی منتقل می‌شود' : 'شروع تمرکز عمیق روی این کار'}
             >
-              <Play className="w-3.5 h-3.5 fill-current" />
+              {switchWait > 0 ? (
+                <span className="text-[10px] font-mono text-amber-300">{Math.ceil(switchWait / 1000)}s</span>
+              ) : (
+                <Play className="w-3.5 h-3.5 fill-current" />
+              )}
             </button>
           )}
 
