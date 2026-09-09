@@ -13,12 +13,14 @@ public sealed class JiraLinkService : IJiraLinkService
     private readonly ITaskJiraRepository _links;
     private readonly ITaskService _tasks;
     private readonly IFocusService _focus;
+    private readonly IJiraRestClient _jiraRest;
 
-    public JiraLinkService(ITaskJiraRepository links, ITaskService tasks, IFocusService focus)
+    public JiraLinkService(ITaskJiraRepository links, ITaskService tasks, IFocusService focus, IJiraRestClient jiraRest)
     {
         _links = links;
         _tasks = tasks;
         _focus = focus;
+        _jiraRest = jiraRest;
     }
 
     public async Task<JiraSeenDto> SeenAsync(JiraSeenRequest request)
@@ -53,9 +55,22 @@ public sealed class JiraLinkService : IJiraLinkService
 
     public async Task<JiraSeenDto> StartAsync(JiraStartRequest request)
     {
-        var key = NormalizeKey(request.JiraKey);
-        var title = CleanTitle(request.Title, key);
+        var key = NormalizeKey(request.JiraKey, request.JiraUrl);
+        var title = await ResolveTitleAsync(request.Title, key);
+        var task = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType);
+        if (string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
+        {
+            await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = TaskStatuses.Doing });
+            task = await _tasks.GetAsync(task.Id) ?? task;
+        }
+        await TryAssignAsync(key);
+
         var focus = await _focus.GetAsync();
+        if (focus.Active && focus.TaskId == task.Id)
+        {
+            var same = await _links.GetByKeyAsync(key);
+            return Result(key, request.JiraUrl, task.Title, "continue", same, focus, key);
+        }
 
         if (focus.Active && (request.FinishPrevious || request.MarkPreviousDone))
         {
@@ -67,7 +82,37 @@ public sealed class JiraLinkService : IJiraLinkService
             });
         }
 
-        var energy = string.IsNullOrWhiteSpace(request.EnergyType) ? EnergyTypes.Deep : request.EnergyType.Trim();
+        await _focus.SetAsync(new SetFocusRequest
+        {
+            Description = task.Title,
+            TaskId = task.Id,
+            DurationMinutes = request.DurationMinutes ?? 10,
+            Source = "Extension",
+            Log = false
+        });
+
+        var started = await _links.GetByKeyAsync(key);
+        var nowFocus = await _focus.GetAsync();
+        return Result(key, request.JiraUrl, task.Title, "continue", started, nowFocus, key);
+    }
+
+    public async Task<JiraSeenDto> RegisterAsync(JiraStartRequest request)
+    {
+        var key = NormalizeKey(request.JiraKey, request.JiraUrl);
+        var title = await ResolveTitleAsync(request.Title, key);
+        var task = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType);
+        await TryAssignAsync(key);
+        var match = await _links.GetByKeyAsync(key);
+        var focus = await _focus.GetAsync();
+        var focusLink = focus.TaskId is int focusTaskId
+            ? await _links.GetByTaskIdAsync(focusTaskId)
+            : null;
+        return Result(key, request.JiraUrl, task.Title, "registered", match, focus, focusLink?.JiraKey);
+    }
+
+    private async Task<TaskDto> EnsureLinkedTaskAsync(string key, string title, string? jiraUrl, string? energyType)
+    {
+        var energy = string.IsNullOrWhiteSpace(energyType) ? EnergyTypes.Deep : energyType.Trim();
         if (!EnergyTypes.All.Contains(energy))
         {
             energy = EnergyTypes.Deep;
@@ -97,54 +142,55 @@ public sealed class JiraLinkService : IJiraLinkService
                 });
             }
 
-            await _links.UpsertAsync(task.Id, key, request.JiraUrl, 1, TaskMapping.Now());
-        }
-        else
-        {
-            task = await _tasks.GetAsync(match.TaskId) ?? throw new InvalidOperationException("Task not found.");
-            if (IsJunkTitle(task.Title, key) && !IsJunkTitle(title, key))
-            {
-                await _tasks.UpdateAsync(task.Id, new UpdateTaskRequest
-                {
-                    Title = title,
-                    Status = task.Status,
-                    EnergyType = task.EnergyType,
-                    TagList = task.Tags,
-                    Ownership = task.Ownership
-                });
-                task = await _tasks.GetAsync(task.Id) ?? task;
-            }
-            if (string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
-            {
-                await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = TaskStatuses.Doing });
-                task = await _tasks.GetAsync(task.Id) ?? task;
-            }
-            if (!string.Equals(task.EnergyType, energy, StringComparison.OrdinalIgnoreCase))
-            {
-                await _tasks.UpdateAsync(task.Id, new UpdateTaskRequest
-                {
-                    Title = task.Title,
-                    Status = task.Status,
-                    EnergyType = energy,
-                    TagList = task.Tags
-                });
-                task = await _tasks.GetAsync(task.Id) ?? task;
-            }
-            await _links.UpsertAsync(task.Id, key, request.JiraUrl ?? match.JiraUrl, match.OpenCount + 1, TaskMapping.Now());
+            await _links.UpsertAsync(task.Id, key, jiraUrl, 1, TaskMapping.Now());
+            return task;
         }
 
-        await _focus.SetAsync(new SetFocusRequest
+        task = await _tasks.GetAsync(match.TaskId) ?? throw new InvalidOperationException("Task not found.");
+        if (IsJunkTitle(task.Title, key) && !IsJunkTitle(title, key))
         {
-            Description = task.Title,
-            TaskId = task.Id,
-            DurationMinutes = request.DurationMinutes ?? 10,
-            Source = "Extension",
-            Log = true
-        });
+            await _tasks.UpdateAsync(task.Id, new UpdateTaskRequest
+            {
+                Title = title,
+                Status = task.Status,
+                EnergyType = task.EnergyType,
+                TagList = task.Tags,
+                Ownership = task.Ownership
+            });
+            task = await _tasks.GetAsync(task.Id) ?? task;
+        }
 
-        var started = await _links.GetByKeyAsync(key);
-        var nowFocus = await _focus.GetAsync();
-        return Result(key, request.JiraUrl, task.Title, "continue", started, nowFocus, key);
+        await _links.UpsertAsync(task.Id, key, jiraUrl ?? match.JiraUrl, match.OpenCount, TaskMapping.Now());
+        return task;
+    }
+
+    private async Task<string> ResolveTitleAsync(string? raw, string key)
+    {
+        var title = CleanTitle(raw, key);
+        if (!IsJunkTitle(title, key))
+        {
+            return title;
+        }
+
+        var summary = await _jiraRest.GetSummaryAsync(key);
+        return string.IsNullOrWhiteSpace(summary) ? key : summary.Trim();
+    }
+
+    private async Task TryAssignAsync(string key)
+    {
+        if (!key.StartsWith("PS-", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            await _jiraRest.AssignToMeAsync(key);
+        }
+        catch (Exception)
+        {
+            // Assignment is best-effort; registration should still succeed.
+        }
     }
 
     private static JiraSeenDto Result(

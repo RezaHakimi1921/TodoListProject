@@ -16,7 +16,7 @@ import {
   ExternalLink
 } from 'lucide-react'
 import { deleteTask, updateTask, updateTaskStatus } from '../api/tasks'
-import { requestTaskFocus, remainingFocusSwitchMs, subscribeFocusSwitch } from '../lib/focusSwitch'
+import { requestTaskFocus } from '../lib/focusSwitch'
 import { TagChipList } from './TagChips'
 import { useTrashConfirm } from './ConfirmProvider'
 import type { TaskItem, TaskStatus } from '../types'
@@ -35,18 +35,6 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
   const askTrash = useTrashConfirm()
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [statusError, setStatusError] = useState('')
-  const [switchWait, setSwitchWait] = useState(() => remainingFocusSwitchMs(task.id))
-
-  useEffect(() => {
-    const sync = () => setSwitchWait(remainingFocusSwitchMs(task.id))
-    sync()
-    const interval = window.setInterval(sync, 250)
-    const unsubscribe = subscribeFocusSwitch(sync)
-    return () => {
-      window.clearInterval(interval)
-      unsubscribe()
-    }
-  }, [task.id])
 
   useEffect(() => {
     if (!showStatusMenu) return
@@ -89,6 +77,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['focus'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
     },
   })
 
@@ -308,20 +297,16 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity shrink-0">
-          {!isDone && (
+          {!isDone && !isDoing && (
             <button
               id={`btn-start-focus-${task.id}`}
               type="button"
               onClick={() => focusMutation.mutate()}
               disabled={focusMutation.isPending}
               className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] transition-all min-w-8"
-              title={switchWait > 0 ? 'اگر ۳۰ ثانیه روی همین کار بمانی منتقل می‌شود' : 'شروع تمرکز عمیق روی این کار'}
+              title="شروع تمرکز عمیق روی این کار"
             >
-              {switchWait > 0 ? (
-                <span className="text-[10px] font-mono text-amber-300">{Math.ceil(switchWait / 1000)}s</span>
-              ) : (
-                <Play className="w-3.5 h-3.5 fill-current" />
-              )}
+              <Play className="w-3.5 h-3.5 fill-current" />
             </button>
           )}
 

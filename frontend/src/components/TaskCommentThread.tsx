@@ -4,6 +4,7 @@ import { Globe, Lock, MessageCircle, Trash2, UserRound } from 'lucide-react'
 import { addJiraIssueComment, getJiraIssueThread, isJiraMe, type JiraCommentAuthor } from '../api/jira'
 import { addTimeline, deleteTimeline, listTimeline } from '../api/tasks'
 import { formatPersianDateTime } from '../lib/dates'
+import { markTaskNotificationsRead } from '../api/notifications'
 
 interface Props {
   taskId: number
@@ -75,6 +76,13 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: 'end' })
   }, [items.length])
+
+  useEffect(() => {
+    if (!Number.isFinite(taskId)) return
+    void markTaskNotificationsRead(taskId).then(() => {
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+    }).catch(() => undefined)
+  }, [queryClient, taskId])
 
   const sendMutation = useMutation({
     mutationFn: async (mode: 'private' | 'jira') => {

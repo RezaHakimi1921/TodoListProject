@@ -9,6 +9,7 @@ import { TrashPage } from './pages/TrashPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { TaskDetailPage } from './pages/TaskDetailPage'
 import { ReportsPage } from './pages/ReportsPage'
+import { NotificationsPage } from './pages/NotificationsPage'
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="problems/:id" element={<ProblemStudioPage />} />
         <Route path="dailylogs" element={<DailyLogPage />} />
         <Route path="trash" element={<TrashPage />} />
+        <Route path="notifications" element={<NotificationsPage />} />
         <Route path="reports" element={<ReportsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="tasks/:id" element={<TaskDetailPage />} />

@@ -8,7 +8,8 @@ import {
   Zap, 
   Feather, 
   Tag, 
-  AlertTriangle 
+  AlertTriangle,
+  ExternalLink
 } from 'lucide-react'
 import { 
   deleteTask, 
@@ -23,6 +24,7 @@ import { TaskCommentThread } from '../components/TaskCommentThread'
 import { TagChipsEditor } from '../components/TagChips'
 import { TaskOwnershipToggle } from '../components/TaskOwnershipToggle'
 import { STUCK_REASONS, type EnergyType, type TaskOwnership, type TaskStatus } from '../types'
+import { taskJiraKey, taskJiraUrl } from '../lib/jira'
 
 export function TaskDetailPage() {
   const { id } = useParams()
@@ -148,6 +150,18 @@ export function TaskDetailPage() {
             onChange={(e) => setTitle(e.target.value)}
             className="w-full rounded-2xl bg-[#0b0e16] border border-[#2b354d] p-3 text-sm font-bold text-white focus:outline-none focus:border-amber-500 leading-relaxed"
           />
+          {taskJiraUrl(taskQuery.data) ? (
+            <a
+              href={taskJiraUrl(taskQuery.data)!}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex items-center gap-1.5 text-xs text-sky-300 hover:text-white"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>باز کردن در جیرا</span>
+              <span className="font-mono text-[11px]">{taskJiraKey(taskQuery.data)}</span>
+            </a>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

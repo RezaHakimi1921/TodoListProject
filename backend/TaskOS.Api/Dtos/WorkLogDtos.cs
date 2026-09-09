@@ -9,6 +9,7 @@ public sealed class WorkLogDto
     public int? TaskId { get; set; }
     public int? ProblemId { get; set; }
     public string CreatedAt { get; set; } = string.Empty;
+    public string? JiraWorklogId { get; set; }
 }
 
 public sealed class CaptureWorkLogRequest

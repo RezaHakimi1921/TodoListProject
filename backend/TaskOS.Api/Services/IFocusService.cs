@@ -11,4 +11,5 @@ public interface IFocusService
     Task<WorkFocusDto> ClearAsync();
     Task<WorkFocusDto> StartRestAsync(string? description = null);
     Task<WorkFocusDto> EndRestAsync();
+    Task FlushElapsedSliceAsync();
 }

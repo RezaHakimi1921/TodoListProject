@@ -16,6 +16,14 @@ function jiraAuthHeader() {
   }
 }
 
+function jiraProxyHeaders() {
+  const auth = jiraAuthHeader()
+  return {
+    ...(auth ? { Authorization: auth } : {}),
+    'X-Atlassian-Token': 'no-check',
+  }
+}
+
 export default defineConfig({
   plugins: [react()],
   server: {
@@ -29,10 +37,17 @@ export default defineConfig({
         target: 'https://jira.smartx.ir',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/jira-rest/, ''),
+        headers: jiraProxyHeaders(),
         configure(proxy) {
           proxy.on('proxyReq', (proxyReq) => {
             const auth = jiraAuthHeader()
             if (auth) proxyReq.setHeader('Authorization', auth)
+            proxyReq.setHeader('X-Atlassian-Token', 'no-check')
+            proxyReq.removeHeader('cookie')
+            proxyReq.removeHeader('Cookie')
+          })
+          proxy.on('proxyRes', (proxyRes) => {
+            delete proxyRes.headers['set-cookie']
           })
         },
       },

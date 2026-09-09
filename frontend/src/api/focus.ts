@@ -1,6 +1,16 @@
 import { api } from './client'
 import type { WorkLogSource } from '../types'
 
+export const JIRA_DWELL_MS = 30_000
+
+export interface JiraSwitchPending {
+  jiraKey: string
+  title: string
+  remainingSeconds: number
+  sinceUnixMs: number
+  taskId: number | null
+}
+
 export interface WorkFocus {
   active: boolean
   description: string
@@ -9,6 +19,32 @@ export interface WorkFocus {
   startedAt: string | null
   updatedAt: string | null
   isResting: boolean
+  pendingSwitch: JiraSwitchPending | null
+}
+
+function pending(row: Record<string, unknown> | null | undefined): JiraSwitchPending | null {
+  if (!row || typeof row !== 'object') return null
+  const key = String(row.jiraKey ?? '').trim()
+  if (!key) return null
+  const remaining = Number(row.remainingSeconds)
+  const sinceUnixMs = Number(row.sinceUnixMs)
+  if (Number.isFinite(sinceUnixMs) && sinceUnixMs > 0) {
+    return {
+      jiraKey: key,
+      title: String(row.title ?? key),
+      remainingSeconds: Math.max(0, Math.ceil((JIRA_DWELL_MS - (Date.now() - sinceUnixMs)) / 1000)),
+      sinceUnixMs,
+      taskId: row.taskId == null ? null : Number(row.taskId),
+    }
+  }
+  if (!Number.isFinite(remaining) || remaining <= 0) return null
+  return {
+    jiraKey: key,
+    title: String(row.title ?? key),
+    remainingSeconds: Math.max(0, Math.round(remaining)),
+    sinceUnixMs: Date.now() - Math.max(0, 30 - remaining) * 1000,
+    taskId: row.taskId == null ? null : Number(row.taskId),
+  }
 }
 
 function camel(row: Record<string, unknown>): WorkFocus {
@@ -20,6 +56,7 @@ function camel(row: Record<string, unknown>): WorkFocus {
     startedAt: (row.startedAt as string | null) ?? null,
     updatedAt: (row.updatedAt as string | null) ?? null,
     isResting: Boolean(row.isResting),
+    pendingSwitch: pending(row.pendingSwitch as Record<string, unknown> | null),
   }
 }
 

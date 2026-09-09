@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createProblem, listProblems } from '../api/problems'
-import { createTask, listTasks, updateTaskStatus } from '../api/tasks'
+import { createTask, getTask, listTasks, updateTaskStatus } from '../api/tasks'
 import { clearFocus, finishFocus, getFocus, setFocus, tickFocus } from '../api/focus'
 import { captureWorkLog } from '../api/workLogs'
 import { ackPing, DEFAULT_PING_MINUTES, getSettings, saveSettings, testToast } from '../api/settings'
@@ -49,6 +49,11 @@ export function WorkLogPrompt() {
   const [eta, setEta] = useState(() => minutesUntilPing(pingMinutes, lastPingAt))
 
   const focusQuery = useQuery({ queryKey: ['focus'], queryFn: getFocus, refetchInterval: 30_000 })
+  const focusTaskQuery = useQuery({
+    queryKey: ['task', focusQuery.data?.taskId],
+    queryFn: () => getTask(Number(focusQuery.data?.taskId)),
+    enabled: Number.isFinite(focusQuery.data?.taskId) && Boolean(focusQuery.data?.active) && !focusQuery.data?.isResting,
+  })
   const doingQuery = useQuery({
     queryKey: ['tasks', 'Doing'],
     queryFn: () => listTasks({ status: 'Doing' }),
@@ -66,7 +71,7 @@ export function WorkLogPrompt() {
   })
 
   const focus = focusQuery.data
-  const current = focus?.active ? focus.description : ''
+  const current = focus?.active ? (focusTaskQuery.data?.title || focus.description) : ''
 
   const openTasks = useMemo(() => {
     const rank: Record<string, number> = { Doing: 0, Stuck: 1, Open: 2 }

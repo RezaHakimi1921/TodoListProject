@@ -107,3 +107,19 @@ CREATE INDEX IF NOT EXISTS IX_Problem_Status ON Problem(Status);
 CREATE INDEX IF NOT EXISTS IX_ProblemOption_ProblemId ON ProblemOption(ProblemId);
 CREATE INDEX IF NOT EXISTS IX_TaskChecklistItem_TaskId ON TaskChecklistItem(TaskId);
 CREATE INDEX IF NOT EXISTS IX_TaskJira_JiraKey ON TaskJira(JiraKey);
+
+CREATE TABLE IF NOT EXISTS JiraCommentInbox (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    TaskId INTEGER NOT NULL,
+    JiraKey TEXT NOT NULL,
+    CommentId TEXT NOT NULL,
+    AuthorName TEXT NOT NULL,
+    Body TEXT NOT NULL,
+    CreatedAt TEXT NOT NULL,
+    SeenAt TEXT NULL,
+    ReceivedAt TEXT NOT NULL,
+    UNIQUE (JiraKey, CommentId)
+);
+
+CREATE INDEX IF NOT EXISTS IX_JiraCommentInbox_SeenAt ON JiraCommentInbox(SeenAt);
+CREATE INDEX IF NOT EXISTS IX_JiraCommentInbox_TaskId ON JiraCommentInbox(TaskId);

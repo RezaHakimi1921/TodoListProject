@@ -16,7 +16,8 @@ public sealed class DatabaseInitializer
         ("ProblemOption", "DeletedAt", "TEXT NULL"),
         ("WorkFocus", "ProblemId", "INTEGER NULL"),
         ("Task", "Ownership", "TEXT NOT NULL DEFAULT 'Mine'"),
-        ("TaskJira", "Description", "TEXT NULL")
+        ("TaskJira", "Description", "TEXT NULL"),
+        ("WorkLogEntry", "JiraWorklogId", "TEXT NULL")
     ];
 
     private readonly SqliteConnectionFactory _factory;
@@ -51,6 +52,7 @@ public sealed class DatabaseInitializer
 
         EnsureWorkLogAllowsBreak(connection);
         EnsureTaskJira(connection);
+        EnsureJiraCommentInbox(connection);
 
         if (!string.IsNullOrWhiteSpace(indexSql))
         {
@@ -132,6 +134,33 @@ public sealed class DatabaseInitializer
                 OpenCount INTEGER NOT NULL DEFAULT 0,
                 LastSeenAt TEXT NULL
             );
+            """);
+    }
+
+    private static void EnsureJiraCommentInbox(SqliteConnection connection)
+    {
+        using var lookup = connection.CreateCommand();
+        lookup.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'JiraCommentInbox'";
+        if (lookup.ExecuteScalar() is string)
+        {
+            return;
+        }
+
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS JiraCommentInbox (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                TaskId INTEGER NOT NULL,
+                JiraKey TEXT NOT NULL,
+                CommentId TEXT NOT NULL,
+                AuthorName TEXT NOT NULL,
+                Body TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL,
+                SeenAt TEXT NULL,
+                ReceivedAt TEXT NOT NULL,
+                UNIQUE (JiraKey, CommentId)
+            );
+            CREATE INDEX IF NOT EXISTS IX_JiraCommentInbox_SeenAt ON JiraCommentInbox(SeenAt);
+            CREATE INDEX IF NOT EXISTS IX_JiraCommentInbox_TaskId ON JiraCommentInbox(TaskId);
             """);
     }
 }

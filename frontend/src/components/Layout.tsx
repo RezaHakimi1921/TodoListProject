@@ -9,10 +9,12 @@ import {
   Settings, 
   Zap, 
   Sparkles,
-  BarChart3
+  BarChart3,
+  Bell
 } from 'lucide-react'
 import { listTrash } from '../api/trash'
 import { listTasks } from '../api/tasks'
+import { getUnreadNotificationCount } from '../api/notifications'
 import { WorkLogPrompt } from './WorkLogPrompt'
 import { PastDaysMenu } from './PastDaysMenu'
 import { formatPersianDate } from '../lib/dates'
@@ -32,6 +34,12 @@ export function Layout() {
     queryFn: () => listTasks(),
   })
 
+  const unreadQuery = useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: () => getUnreadNotificationCount(),
+    refetchInterval: 15_000,
+  })
+  const unreadCount = unreadQuery.data ?? 0
   const trashCount = trashQuery.data?.length ?? 0
   const activeTasksCount = tasksQuery.data?.filter((t) => t.status !== 'Done').length ?? 0
   const deepCount = tasksQuery.data?.filter((t) => t.status !== 'Done' && t.energyType === 'Deep').length ?? 0
@@ -41,6 +49,7 @@ export function Layout() {
   const navItems = [
     { to: '/', label: 'کارهای امروز', icon: CheckSquare, end: true },
     { to: '/worklogs', label: 'ثبت کار و زمان', icon: Clock },
+    { to: '/notifications', label: 'نوتیفیکیشن', icon: Bell, badge: unreadCount > 0 ? unreadCount : null },
     { to: '/reports', label: 'گزارش', icon: BarChart3 },
     { to: '/problems', label: 'استودیوی مسئله', icon: HelpCircle },
     { to: '/dailylogs', label: 'دفترچه یادگیری', icon: BookOpen },

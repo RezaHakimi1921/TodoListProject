@@ -25,7 +25,9 @@ export function useFocusTaskStatus() {
     const currentId = focus.active && !focus.isResting ? focus.taskId : null
     const current = currentId ? tasks.find((task) => task.id === currentId) : undefined
     const extras = tasks.filter((task) => task.status === 'Doing' && task.id !== currentId)
-    const currentNeedsDoing = Boolean(current && current.status !== 'Doing' && current.status !== 'Done')
+    const currentNeedsDoing = Boolean(
+      current && current.status !== 'Doing' && current.status !== 'Done',
+    )
     if (!currentNeedsDoing && extras.length === 0) return
 
     inFlight.current = true

@@ -8,6 +8,13 @@ import { formatPersianDateTime, todayIso } from '../lib/dates'
 import { WorkLogDuration } from './WorkLogDuration'
 import { WorkLogTags } from './WorkLogTags'
 
+function shouldShowDescription(description: string, taskTitle?: string) {
+  const text = description.trim()
+  if (!text || text === 'کار') return false
+  if (taskTitle && text === taskTitle.trim()) return false
+  return true
+}
+
 interface Props {
   kind: 'task' | 'problem'
   id: number
@@ -163,7 +170,9 @@ export function EntityWorkLogs({ kind, id }: Props) {
           entries.map((entry) => (
             <div key={entry.id} className="py-2 flex items-center justify-between text-xs">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-slate-200 font-medium">{entry.description}</span>
+                {shouldShowDescription(entry.description, taskQuery.data?.title) ? (
+                  <span className="text-slate-200 font-medium">{entry.description}</span>
+                ) : null}
                 <WorkLogTags
                   source={entry.source}
                   jiraEdited={Boolean(entry.jiraWorklogId && editedIds.has(String(entry.jiraWorklogId)))}

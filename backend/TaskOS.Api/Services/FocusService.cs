@@ -32,17 +32,37 @@ public sealed class FocusService : IFocusService
             dto.Description = "استراحت";
             dto.Active = true;
         }
+        else if (dto.Active && !dto.IsResting && dto.TaskId is int taskId)
+        {
+            var title = await connection.QuerySingleOrDefaultAsync<string>(
+                "SELECT Title FROM Task WHERE Id = @Id AND DeletedAt IS NULL", new { Id = taskId });
+            if (!string.IsNullOrWhiteSpace(title))
+            {
+                dto.Description = title;
+                if (IsBrokenDescription(row?.Description))
+                {
+                    await connection.ExecuteAsync(
+                        "UPDATE WorkFocus SET Description = @Title WHERE Id = 1",
+                        new { Title = title });
+                }
+            }
+        }
         return dto;
     }
 
     public async Task<WorkFocusDto> SetAsync(SetFocusRequest request)
     {
-        if (await _settings.IsRestingAsync())
+        var current = await GetAsync();
+        if (current.IsResting)
         {
             await _settings.SetRestingAsync(false);
         }
+        else
+        {
+            await TryLogOutgoingFocusAsync(current, request);
+        }
 
-        var description = Require(request.Description, "Description is required.");
+        var description = await ResolveFocusDescriptionAsync(request);
         var now = TaskMapping.Now();
         using var connection = _factory.Create();
         await connection.ExecuteAsync("""
@@ -57,16 +77,13 @@ public sealed class FocusService : IFocusService
                 Active = 1
             """, new { Description = description, TaskId = request.TaskId, ProblemId = request.ProblemId, Now = now });
 
-        if (request.Log)
+        if (request.TaskId is int startedId)
         {
-            await _workLogs.CaptureAsync(new CaptureWorkLogRequest
+            var started = await _tasks.GetAsync(startedId);
+            if (started is not null && !string.Equals(started.Status, "Done", StringComparison.OrdinalIgnoreCase))
             {
-                Description = description,
-                DurationMinutes = request.DurationMinutes ?? 15,
-                Source = request.Source,
-                TaskId = request.TaskId,
-                ProblemId = request.ProblemId
-            });
+                await _tasks.UpdateStatusAsync(startedId, new UpdateTaskStatusRequest { Status = "Doing" });
+            }
         }
 
         return await GetAsync();
@@ -80,11 +97,12 @@ public sealed class FocusService : IFocusService
             throw new InvalidOperationException("کار فعالی برای ادامه وجود ندارد.");
         }
 
-        await LogFocusSlice(focus, request);
+        await LogElapsedWorkAsync(focus, request.Source);
+        var now = TaskMapping.Now();
         using var connection = _factory.Create();
         await connection.ExecuteAsync(
-            "UPDATE WorkFocus SET UpdatedAt = @Now WHERE Id = 1",
-            new { Now = TaskMapping.Now() });
+            "UPDATE WorkFocus SET StartedAt = @Now, UpdatedAt = @Now WHERE Id = 1",
+            new { Now = now });
         return await GetAsync();
     }
 
@@ -93,7 +111,7 @@ public sealed class FocusService : IFocusService
         var focus = await GetAsync();
         if (focus.Active && !focus.IsResting)
         {
-            await LogFocusSlice(focus, request);
+            await LogElapsedWorkAsync(focus, request.Source);
         }
 
         var taskId = request.TaskId ?? focus.TaskId;
@@ -112,6 +130,12 @@ public sealed class FocusService : IFocusService
 
     public async Task<WorkFocusDto> ClearAsync()
     {
+        var focus = await GetAsync();
+        if (focus.Active && !focus.IsResting)
+        {
+            await LogElapsedWorkAsync(focus, WorkLogSources.Timer);
+        }
+
         await _settings.SetRestingAsync(false);
         using var connection = _factory.Create();
         await connection.ExecuteAsync(
@@ -125,6 +149,11 @@ public sealed class FocusService : IFocusService
         var focus = await GetAsync();
         if (!focus.IsResting)
         {
+            if (focus.Active)
+            {
+                await LogElapsedWorkAsync(focus, WorkLogSources.Timer);
+            }
+
             await _settings.SaveRestResumeAsync(
                 focus.Active ? focus.TaskId : null,
                 focus.Active ? focus.ProblemId : null,
@@ -157,11 +186,8 @@ public sealed class FocusService : IFocusService
         if (focus.IsResting && !string.IsNullOrWhiteSpace(focus.StartedAt)
             && DateTime.TryParse(focus.StartedAt, out var started))
         {
-            var startedUtc = started.Kind == DateTimeKind.Unspecified
-                ? DateTime.SpecifyKind(started, DateTimeKind.Utc)
-                : started.ToUniversalTime();
-            var minutes = (int)Math.Round((DateTime.UtcNow - startedUtc).TotalMinutes);
-            if (minutes >= 1 && minutes <= 480)
+            var minutes = ClampLogMinutes(ElapsedMinutes(started));
+            if (minutes is >= 1 and <= 480)
             {
                 await _workLogs.CaptureAsync(new CaptureWorkLogRequest
                 {
@@ -188,15 +214,139 @@ public sealed class FocusService : IFocusService
         return await ClearAsync();
     }
 
-    private Task LogFocusSlice(WorkFocusDto focus, FocusActionRequest request) =>
-        _workLogs.CaptureAsync(new CaptureWorkLogRequest
+    public async Task FlushElapsedSliceAsync()
+    {
+        var focus = await GetAsync();
+        if (!focus.Active || focus.IsResting)
+        {
+            return;
+        }
+
+        if (focus.TaskId is null && focus.ProblemId is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(focus.StartedAt) || !DateTime.TryParse(focus.StartedAt, out var started))
+        {
+            return;
+        }
+
+        var elapsed = ElapsedMinutes(started);
+        var ping = Math.Max(1, (await _settings.GetAsync()).PingMinutes);
+        if (elapsed < ping)
+        {
+            return;
+        }
+
+        await TickAsync(new FocusActionRequest
+        {
+            DurationMinutes = elapsed,
+            Source = WorkLogSources.Timer
+        });
+    }
+
+    private async Task TryLogOutgoingFocusAsync(WorkFocusDto current, SetFocusRequest next)
+    {
+        if (!current.Active || current.IsResting)
+        {
+            return;
+        }
+
+        if (current.TaskId is null && current.ProblemId is null)
+        {
+            return;
+        }
+
+        var sameTarget = current.TaskId == next.TaskId && current.ProblemId == next.ProblemId;
+        if (sameTarget)
+        {
+            return;
+        }
+
+        await LogElapsedWorkAsync(current, WorkLogSources.Timer);
+    }
+
+    private async Task LogElapsedWorkAsync(WorkFocusDto focus, string? source)
+    {
+        if (!focus.Active || focus.IsResting)
+        {
+            return;
+        }
+
+        if (focus.TaskId is null && focus.ProblemId is null)
+        {
+            return;
+        }
+
+        var minutes = SliceMinutes(focus);
+        await _workLogs.CaptureAsync(new CaptureWorkLogRequest
         {
             Description = focus.Description,
-            DurationMinutes = request.DurationMinutes ?? 15,
-            Source = request.Source,
+            DurationMinutes = minutes,
+            Source = string.IsNullOrWhiteSpace(source) ? WorkLogSources.Timer : source.Trim(),
             TaskId = focus.TaskId,
             ProblemId = focus.ProblemId
         });
+    }
+
+    private static int SliceMinutes(WorkFocusDto focus)
+    {
+        if (!string.IsNullOrWhiteSpace(focus.StartedAt) && DateTime.TryParse(focus.StartedAt, out var started))
+        {
+            var elapsed = ElapsedMinutes(started);
+            if (elapsed >= 1)
+            {
+                return ClampLogMinutes(elapsed);
+            }
+        }
+
+        return 1;
+    }
+
+    private static bool IsBrokenDescription(string? value)
+    {
+        var text = (value ?? string.Empty).Trim();
+        if (text.Length == 0) return true;
+        if (text.All(ch => ch == '?' || char.IsWhiteSpace(ch))) return true;
+        if (text.Contains("jira.smartx.ir", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("://", StringComparison.OrdinalIgnoreCase)
+            || text.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private async Task<string> ResolveFocusDescriptionAsync(SetFocusRequest request)
+    {
+        if (request.TaskId is int taskId)
+        {
+            var task = await _tasks.GetAsync(taskId);
+            if (task is not null && !string.IsNullOrWhiteSpace(task.Title))
+            {
+                return task.Title.Trim();
+            }
+        }
+
+        return Require(request.Description, "Description is required.");
+    }
+
+    private static int ElapsedMinutes(DateTime started)
+    {
+        var startedUtc = started.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(started, DateTimeKind.Utc)
+            : started.ToUniversalTime();
+        return (int)Math.Round((DateTime.UtcNow - startedUtc).TotalMinutes);
+    }
+
+    private static int ClampLogMinutes(int minutes)
+    {
+        if (minutes < 1) return 1;
+        if (minutes > 480) return 480;
+        return minutes;
+    }
 
     private static WorkFocusDto Map(FocusRow? row)
     {

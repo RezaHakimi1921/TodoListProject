@@ -18,6 +18,11 @@ public sealed class JiraStartRequest
     public string? EnergyType { get; set; }
 }
 
+public sealed class AddJiraCommentRequest
+{
+    public string Body { get; set; } = string.Empty;
+}
+
 public sealed class JiraSeenDto
 {
     public string JiraKey { get; set; } = string.Empty;
@@ -43,4 +48,21 @@ public sealed class JiraFocusRefDto
     public string Description { get; set; } = string.Empty;
     public int? TaskId { get; set; }
     public string? JiraKey { get; set; }
+}
+
+public sealed class JiraWatchRequest
+{
+    public string JiraKey { get; set; } = string.Empty;
+    public string? JiraUrl { get; set; }
+    public string? Title { get; set; }
+    public long SinceUnixMs { get; set; }
+}
+
+public sealed class JiraSwitchPendingDto
+{
+    public string JiraKey { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public int RemainingSeconds { get; set; }
+    public long SinceUnixMs { get; set; }
+    public int? TaskId { get; set; }
 }

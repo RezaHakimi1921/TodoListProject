@@ -270,7 +270,7 @@ public sealed class TaskService : ITaskService
             task.DoneAt = null;
             task.StuckReason = status.Equals(TaskStatuses.Stuck, StringComparison.OrdinalIgnoreCase)
                 ? stuckReason
-                : stuckReason ?? task.StuckReason;
+                : null;
         }
     }
 }

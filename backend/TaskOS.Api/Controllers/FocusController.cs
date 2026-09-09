@@ -9,14 +9,22 @@ namespace TaskOS.Api.Controllers;
 public sealed class FocusController : ControllerBase
 {
     private readonly IFocusService _focus;
+    private readonly IJiraWatchService _watch;
 
-    public FocusController(IFocusService focus)
+    public FocusController(IFocusService focus, IJiraWatchService watch)
     {
         _focus = focus;
+        _watch = watch;
     }
 
     [HttpGet]
-    public async Task<ActionResult<WorkFocusDto>> Get() => Ok(await _focus.GetAsync());
+    public async Task<ActionResult<WorkFocusDto>> Get()
+    {
+        var pending = await _watch.GetPendingAsync();
+        var focus = await _focus.GetAsync();
+        focus.PendingSwitch = pending;
+        return Ok(focus);
+    }
 
     [HttpPut]
     public async Task<ActionResult<WorkFocusDto>> Set([FromBody] SetFocusRequest request)
@@ -71,4 +79,3 @@ public sealed class FocusController : ControllerBase
     [HttpPost("rest/end")]
     public async Task<ActionResult<WorkFocusDto>> EndRest() => Ok(await _focus.EndRestAsync());
 }
-

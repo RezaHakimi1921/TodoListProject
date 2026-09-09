@@ -20,6 +20,7 @@ public sealed class WorkPingHostedService : BackgroundService
             try
             {
                 using var scope = _scopes.CreateScope();
+                await scope.ServiceProvider.GetRequiredService<IFocusService>().FlushElapsedSliceAsync();
                 var ping = scope.ServiceProvider.GetRequiredService<IWorkPingService>();
                 await ping.TryNotifyAsync(force: false, stoppingToken);
             }

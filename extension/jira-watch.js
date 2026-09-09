@@ -2,7 +2,28 @@ const KEY_IN_URL = /[A-Z][A-Z0-9]+-\d+/gi
 let lastSent = ''
 
 function extractKey(url) {
-  const matches = String(url).match(KEY_IN_URL)
+  try {
+    const parsed = new URL(url || location.href)
+    const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''))
+    const selected = parsed.searchParams.get('selectedIssue')
+      || hashParams.get('selectedIssue')
+      || parsed.searchParams.get('issueKey')
+      || parsed.searchParams.get('createdIssueKey')
+      || hashParams.get('issueKey')
+    if (selected && /^[A-Z][A-Z0-9]+-\d+$/i.test(selected)) return selected.toUpperCase()
+    const path = parsed.pathname.match(/\/(?:browse|issues)\/([A-Z][A-Z0-9]+-\d+)/i)
+    if (path) return path[1].toUpperCase()
+    const desk = parsed.pathname.match(/\/servicedesk\/customer\/portal\/\d+\/([A-Z][A-Z0-9]+-\d+)/i)
+    if (desk) return desk[1].toUpperCase()
+  } catch {
+    /* ignore */
+  }
+  const meta = document.querySelector('meta[name="ajs-issue-key"]')?.getAttribute('content')
+  if (meta && /^[A-Z][A-Z0-9]+-\d+$/i.test(meta)) return meta.toUpperCase()
+  const marked = document.querySelector('[data-issue-key], #key-val')
+  const markedKey = marked?.getAttribute('data-issue-key') || marked?.textContent
+  if (markedKey && /^[A-Z][A-Z0-9]+-\d+$/i.test(markedKey.trim())) return markedKey.trim().toUpperCase()
+  const matches = String(url || location.href).match(KEY_IN_URL)
   return matches?.length ? matches[matches.length - 1].toUpperCase() : null
 }
 
@@ -77,6 +98,7 @@ window.addEventListener('pageshow', () => report(true))
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') report(true)
 })
+setInterval(() => report(false), 2000)
 
 new MutationObserver(() => report(false)).observe(document.documentElement, {
   childList: true,

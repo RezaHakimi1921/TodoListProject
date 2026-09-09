@@ -21,6 +21,13 @@ import { listTasks } from '../api/tasks'
 import { todayIso, formatPersianDate, formatPersianDateTime } from '../lib/dates'
 import type { WorkLogSource } from '../types'
 
+function shouldShowDescription(description: string, taskTitle?: string) {
+  const text = description.trim()
+  if (!text || text === 'کار') return false
+  if (taskTitle && text === taskTitle.trim()) return false
+  return true
+}
+
 export function WorkLogPage() {
   const queryClient = useQueryClient()
   const [date, setDate] = useState<string>(todayIso())
@@ -314,7 +321,9 @@ export function WorkLogPage() {
                       <WorkLogDuration localMinutes={log.durationMinutes} jiraMinutes={log.jiraWorklogId ? jiraMinutesById[String(log.jiraWorklogId)] : null} edited={Boolean(log.jiraWorklogId && editedJiraIds.has(String(log.jiraWorklogId)))} />
                     </span>
                     <div>
-                      <p className="text-slate-100 font-semibold">{log.description}</p>
+                      {shouldShowDescription(log.description, matchedTask?.title) ? (
+                        <p className="text-slate-100 font-semibold">{log.description}</p>
+                      ) : null}
                       {matchedTask && (
                         <p className="text-[11px] text-amber-400/90 mt-0.5">
                           پروژه: {matchedTask.title}

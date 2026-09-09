@@ -1,5 +1,8 @@
 const ALARM = 'taskos-worklog'
 const SYNC = 'taskos-settings-sync'
+const DWELL_ALARM = 'taskos-jira-dwell'
+const BEAT_ALARM = 'taskos-jira-beat'
+const SCAN_ALARM = 'taskos-jira-scan'
 const NOTE_ID = 'taskos-ping'
 const JIRA_NOTE = 'taskos-jira'
 const API = 'http://127.0.0.1:5088'
@@ -126,6 +129,16 @@ function isProductSupport(key) {
   return /^PS-\d+$/i.test(String(key || ''))
 }
 
+function isTaskOsUrl(url) {
+  try {
+    const parsed = new URL(url)
+    return (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')
+      && (parsed.port === '5173' || parsed.port === '5088' || parsed.port === '')
+  } catch {
+    return false
+  }
+}
+
 async function assignPsToMe(key) {
   if (!isProductSupport(key)) return
   try {
@@ -227,6 +240,43 @@ async function writeWatch(watch) {
   await chrome.storage.local.set({ jiraWatch: watch })
 }
 
+async function heartbeatWatch(watch) {
+  if (!watch?.key || !isProductSupport(watch.key)) return
+  try {
+    await fetch(`${API}/api/jira/watch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jiraKey: watch.key,
+        jiraUrl: watch.url,
+        title: watch.title,
+        sinceUnixMs: Number(watch.since) || Date.now(),
+      }),
+    })
+  } catch {
+    /* API down */
+  }
+}
+
+async function clearWatchAndApi(key) {
+  await writeWatch(null)
+  await chrome.alarms.clear(DWELL_ALARM)
+  await chrome.alarms.clear(BEAT_ALARM)
+  try {
+    const query = key ? `?key=${encodeURIComponent(key)}` : ''
+    await fetch(`${API}/api/jira/watch${query}`, { method: 'DELETE' })
+  } catch {
+    /* API down */
+  }
+}
+
+async function armWatchAlarms(watch) {
+  const since = Number(watch.since) || Date.now()
+  const remaining = Math.max(500, DWELL_MS - (Date.now() - since))
+  await chrome.alarms.create(DWELL_ALARM, { when: Date.now() + remaining })
+  await chrome.alarms.create(BEAT_ALARM, { when: Date.now() + 2000 })
+}
+
 async function getActiveTab() {
   const focused = await chrome.tabs.query({ active: true, lastFocusedWindow: true })
   if (focused[0]) return focused[0]
@@ -238,9 +288,25 @@ function tabKey(tab) {
   return tab?.url ? extractJiraKey(tab.url) : null
 }
 
+async function jiraTabHasKey(key) {
+  const tabs = await chrome.tabs.query({ url: `https://${JIRA_HOST}/*` })
+  return tabs.some((tab) => extractJiraKey(tab.url) === key)
+}
+
 async function stillOnKey(key) {
   const tab = await getActiveTab()
   return Boolean(tab && tabKey(tab) === key)
+}
+
+async function stillWatching(key) {
+  if (await stillOnKey(key)) return true
+  if (await jiraTabHasKey(key)) return true
+  const tab = await getActiveTab()
+  const watch = await readWatch()
+  if (tab?.url && isJiraHost(tab.url) && !extractJiraKey(tab.url) && watch && Number(watch.tabId) === tab.id) {
+    return true
+  }
+  return false
 }
 
 async function findTaskByJiraKey(key) {
@@ -282,21 +348,34 @@ function scheduleJiraCheck(tab) {
 
 async function scheduleJiraCheckAsync(tab) {
   if (!tab?.id || !tab.url) return
+  if (isTaskOsUrl(tab.url)) {
+    const watch = await readWatch()
+    if (watch?.key && await jiraTabHasKey(watch.key)) {
+      await heartbeatWatch(watch)
+      await armWatchAlarms(watch)
+    }
+    return
+  }
+
   const key = extractJiraKey(tab.url)
   if (!key) {
-    const watch = await readWatch()
-    if (watch) await writeWatch(null)
-    if (isJiraHost(tab.url)) {
-      const existing = pending.get(tab.id)
-      if (existing && existing.key === '__home__') return
-      clearPending(tab.id)
-      const timer = setTimeout(() => {
-        pending.delete(tab.id)
-        void handleJiraHome()
-      }, DWELL_MS)
-      pending.set(tab.id, { key: '__home__', timer })
+    if (isJiraHost(tab.url) || isTaskOsUrl(tab.url)) {
+      const keep = await readWatch()
+      if (keep?.key) {
+        await heartbeatWatch(keep)
+        await armWatchAlarms(keep)
+      }
       return
     }
+    const watch = await readWatch()
+    if (watch) await clearWatchAndApi(watch.key)
+    clearPending(tab.id)
+    return
+  }
+
+  if (!isProductSupport(key)) {
+    const watch = await readWatch()
+    if (watch) await clearWatchAndApi(watch.key)
     clearPending(tab.id)
     return
   }
@@ -305,9 +384,12 @@ async function scheduleJiraCheckAsync(tab) {
   const now = Date.now()
   const watch = await readWatch()
   const since = watch && watch.key === key && Number(watch.since) > 0 ? Number(watch.since) : now
-  if (!watch || watch.key !== key || watch.url !== tab.url || watch.title !== title) {
-    await writeWatch({ key, since, url: tab.url, title })
+  const next = { key, since, url: tab.url, title, tabId: tab.id }
+  if (!watch || watch.key !== key || watch.url !== tab.url || watch.title !== title || watch.tabId !== tab.id) {
+    await writeWatch(next)
   }
+  await heartbeatWatch(next)
+  await armWatchAlarms(next)
 
   const remaining = Math.max(0, DWELL_MS - (now - since))
   const existing = pending.get(tab.id)
@@ -327,62 +409,25 @@ async function scheduleJiraCheckAsync(tab) {
 
 async function handleJiraDwell(payload) {
   if (!isProductSupport(payload.key)) return
-  if (!(await stillOnKey(payload.key))) return
+  if (!(await stillWatching(payload.key))) {
+    return
+  }
 
   const watch = await readWatch()
   if (!watch || watch.key !== payload.key) return
   const elapsed = Date.now() - Number(watch.since || 0)
   if (elapsed < DWELL_MS) {
-    const tab = await getActiveTab()
-    if (!tab?.id) return
-    clearPending(tab.id)
-    const timer = setTimeout(() => {
-      pending.delete(tab.id)
-      void handleJiraDwell({
-        key: payload.key,
-        url: tab.url || payload.url,
-        title: cleanJiraTitle(tab.title, payload.key),
-      })
-    }, DWELL_MS - elapsed)
-    pending.set(tab.id, { key: payload.key, url: tab.url || payload.url, title: payload.title, timer })
+    await armWatchAlarms(watch)
     return
   }
-
-  const stored = await chrome.storage.local.get(['jiraDebounce', 'paused'])
-  if (stored.paused) return
-  const debounce = stored.jiraDebounce || {}
-  if (debounce[payload.key] && Date.now() - debounce[payload.key] < DEBOUNCE_MS) return
 
   void assignPsToMe(payload.key)
   let title = cleanJiraTitle(payload.title, payload.key)
   if (isJunkJiraTitle(title, payload.key)) {
     title = (await fetchJiraSummary(payload.key)) || title
   }
-
-  const focus = await getFocus()
-  const task = await findTaskByJiraKey(payload.key)
-  let decision = 'ask-create'
-  if (task) {
-    if (focus?.active && focus.taskId === task.id) decision = 'continue'
-    else if (focus?.active && focus.taskId && focus.taskId !== task.id) decision = 'ask-switch'
-    else decision = 'ask-start'
-  }
-  if (decision === 'continue') {
-    debounce[payload.key] = Date.now()
-    await chrome.storage.local.set({ jiraDebounce: debounce })
-    return
-  }
-
-  const seen = {
-    jiraKey: payload.key,
-    jiraUrl: payload.url,
-    title,
-    decision,
-    currentFocus: focus,
-  }
-  debounce[payload.key] = Date.now()
-  await chrome.storage.local.set({ jiraDebounce: debounce, lastJira: seen })
-  await showJiraAsk(seen)
+  await writeWatch({ ...watch, title })
+  await heartbeatWatch({ ...watch, title })
 }
 
 function jiraQuery(seen) {
@@ -452,9 +497,25 @@ function watchTab(tabId, changeInfo, tab) {
   }
 }
 
+async function scanOpenPsTickets() {
+  const watch = await readWatch()
+  const tabs = await chrome.tabs.query({ url: `https://${JIRA_HOST}/*` })
+  if (watch?.key) {
+    if (tabs.some((tab) => extractJiraKey(tab.url) === watch.key) || await stillOnKey(watch.key)) {
+      await heartbeatWatch(watch)
+      await armWatchAlarms(watch)
+    }
+    return
+  }
+  const focused = await getActiveTab()
+  if (focused && isProductSupport(tabKey(focused))) scheduleJiraCheck(focused)
+}
+
 function boot() {
   void ensureAlarm()
   void ensureSyncAlarm()
+  void chrome.alarms.create(SCAN_ALARM, { periodInMinutes: 1 })
+  void scanOpenPsTickets()
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -489,6 +550,31 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     await ensureAlarm()
     return
   }
+  if (alarm.name === SCAN_ALARM) {
+    await scanOpenPsTickets()
+    return
+  }
+  if (alarm.name === BEAT_ALARM) {
+    const watch = await readWatch()
+    if (!watch?.key) return
+    if (!(await stillWatching(watch.key))) {
+      await clearWatchAndApi(watch.key)
+      return
+    }
+    await heartbeatWatch(watch)
+    await chrome.alarms.create(BEAT_ALARM, { when: Date.now() + 2000 })
+    return
+  }
+  if (alarm.name === DWELL_ALARM) {
+    const watch = await readWatch()
+    if (!watch?.key) return
+    await handleJiraDwell({
+      key: watch.key,
+      url: watch.url,
+      title: watch.title,
+    })
+    return
+  }
   if (alarm.name !== ALARM) return
   await showPing()
   await ensureAlarm()
@@ -503,11 +589,29 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     const tab = await chrome.tabs.get(tabId)
     const key = tabKey(tab)
     const watch = await readWatch()
-    if (watch && watch.key !== key) await writeWatch(null)
+    if (isTaskOsUrl(tab.url || '')) {
+      scheduleJiraCheck(tab)
+      return
+    }
+    if (watch && key && watch.key !== key) {
+      scheduleJiraCheck(tab)
+      return
+    }
+    if (watch && !key && !isJiraHost(tab.url || '') && !isTaskOsUrl(tab.url || '')) {
+      await clearWatchAndApi(watch.key)
+      return
+    }
     scheduleJiraCheck(tab)
   } catch {
     /* tab gone */
   }
+})
+
+chrome.tabs.onRemoved.addListener(async () => {
+  const watch = await readWatch()
+  if (!watch?.key) return
+  if (await jiraTabHasKey(watch.key)) return
+  await clearWatchAndApi(watch.key)
 })
 
 function watchNavigation(details) {

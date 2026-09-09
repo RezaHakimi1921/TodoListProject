@@ -129,14 +129,7 @@ export function getJiraIssueThread(jiraKey: string) {
 }
 
 export function addJiraIssueComment(jiraKey: string, body: string) {
-  return fetch(`/jira-rest/rest/api/2/issue/${encodeURIComponent(jiraKey)}/comment`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ body }),
-  }).then(async (response) => {
-    if (!response.ok) throw new Error('ثبت کامنت در جیرا انجام نشد')
-    return response.json()
-  })
+  return api.post<{ ok: boolean }>(`/api/jira/issues/${encodeURIComponent(jiraKey)}/comments`, { body })
 }
 
 export function isJiraMe(person?: JiraCommentAuthor | null) {
