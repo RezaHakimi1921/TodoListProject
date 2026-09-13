@@ -1,3 +1,5 @@
+@import './theme-light.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -43,3 +45,48 @@
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+.work-dock-chip {
+  border-color: #fcd34d;
+  background: #fef3c7;
+  color: #78350f;
+}
+.work-dock-log {
+  background: #f59e0b;
+  color: #111827;
+  box-shadow: 0 8px 18px rgb(245 158 11 / 0.35);
+}
+.work-dock-problem {
+  background: #1f2937;
+  color: #ffffff;
+}
+.work-dock-ping.is-on {
+  background: #059669;
+  color: #ffffff;
+}
+.work-dock-ping.is-off {
+  background: #e11d48;
+  color: #ffffff;
+}
+.work-dock-test {
+  background: #ffffff;
+  color: #111827;
+  border: 2px solid #111827;
+}
+.work-dock-eta {
+  background: #e5e7eb;
+  color: #1f2937;
+}
+.work-dock-eta.is-off {
+  background: #ffe4e6;
+  color: #9f1239;
+}
+
+html[data-theme='light'] .work-dock-chip { color: #78350f !important; background: #fef3c7 !important; }
+html[data-theme='light'] .work-dock-log { color: #111827 !important; background: #f59e0b !important; }
+html[data-theme='light'] .work-dock-problem { color: #ffffff !important; background: #111827 !important; }
+html[data-theme='light'] .work-dock-ping.is-on { color: #ffffff !important; background: #047857 !important; }
+html[data-theme='light'] .work-dock-ping.is-off { color: #ffffff !important; background: #e11d48 !important; }
+html[data-theme='light'] .work-dock-test { color: #111827 !important; background: #ffffff !important; border-color: #111827 !important; }
+html[data-theme='light'] .work-dock-eta { color: #1f2937 !important; background: #e5e7eb !important; }
+html[data-theme='light'] .work-dock-eta.is-off { color: #9f1239 !important; background: #ffe4e6 !important; }

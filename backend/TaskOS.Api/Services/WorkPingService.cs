@@ -47,12 +47,6 @@ public sealed class WorkPingService : IWorkPingService
             return false;
         }
 
-        var current = await _focus.GetAsync();
-        if (current.Active && !current.IsResting)
-        {
-            return false;
-        }
-
         if (!force && !IsDue(settings))
         {
             return false;

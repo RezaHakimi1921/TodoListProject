@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import os from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
@@ -24,11 +25,43 @@ function jiraProxyHeaders() {
   }
 }
 
+function lanUrls(port: number) {
+  const urls: string[] = []
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const item of list ?? []) {
+      if (item.family === 'IPv4' && !item.internal) {
+        urls.push(`http://${item.address}:${port}`)
+      }
+    }
+  }
+  return urls
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    {
+      name: 'taskos-lan',
+      configureServer(server) {
+        server.middlewares.use('/__lan', (_req, res) => {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.end(JSON.stringify({ urls: lanUrls(server.config.server.port ?? 5173) }))
+        })
+      },
+    },
+  ],
   server: {
+    host: true,
     port: 5173,
     proxy: {
+      '/api/push': {
+        target: 'http://127.0.0.1:5108',
+        changeOrigin: true,
+      },
+      '/api/problems': {
+        target: 'http://127.0.0.1:5098',
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://127.0.0.1:5088',
         changeOrigin: true,

@@ -13,3 +13,16 @@ export function taskJiraUrl(task: Pick<TaskItem, 'title' | 'jiraKey' | 'jiraUrl'
   const key = taskJiraKey(task)
   return key ? `https://jira.smartx.ir/browse/${key}` : null
 }
+
+export function jiraWikiToText(raw?: string | null) {
+  if (!raw) return ''
+  return String(raw)
+    .replace(/\r\n/g, '\n')
+    .replace(/!([^!\n]+)!/g, '📎 تصویر')
+    .replace(/\[([^\]|\n]+)\|([^\]\n]+)\]/g, '$2')
+    .replace(/\[([^\]\n]+)\]/g, '$1')
+    .replace(/^[hH][1-6]\.\s*/gm, '')
+    .replace(/\{color:[^}]*\}/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}

@@ -4,15 +4,25 @@ setlocal
 cd /d "E:\TodoListProject"
 set "API_DIR=E:\TodoListProject\backend\TaskOS.Api"
 set "API_EXE=E:\TodoListProject\backend\TaskOS.Api\bin\Debug\net9.0-windows10.0.19041.0\TaskOS.Api.exe"
+set "PUSH_EXE=E:\TodoListProject\backend\TaskOS.Api\bin\push\TaskOS.Api.exe"
 set "UI_DIR=E:\TodoListProject\frontend"
 set "NODE=C:\nvm4w\nodejs"
 netstat -ano | findstr ":5088" | findstr LISTENING >nul
-if not errorlevel 1 goto ui
+if not errorlevel 1 goto push
 if exist "%API_EXE%" (
   start "TaskOS API" /MIN /D "%API_DIR%" "%API_EXE%" --urls http://127.0.0.1:5088
 ) else (
   cd /d "%API_DIR%"
   start "TaskOS API" /MIN dotnet run --urls http://127.0.0.1:5088
+)
+:push
+netstat -ano | findstr ":5108" | findstr LISTENING >nul
+if not errorlevel 1 goto ui
+if exist "%PUSH_EXE%" (
+  start "TaskOS Push" /MIN /D "%API_DIR%" "%PUSH_EXE%" --urls http://127.0.0.1:5108 --push-only
+) else (
+  cd /d "%API_DIR%"
+  start "TaskOS Push" /MIN dotnet run --urls http://127.0.0.1:5108 --push-only
 )
 :ui
 netstat -ano | findstr ":5173" | findstr LISTENING >nul
@@ -20,7 +30,7 @@ if not errorlevel 1 goto wait
 if not exist "C:\nvm4w\nodejs\npx.cmd" goto wait
 cd /d "%UI_DIR%"
 set "PATH=%NODE%;%PATH%"
-start "TaskOS UI" /MIN npx vite --port 5173 --host 127.0.0.1
+start "TaskOS UI" /MIN npx vite --port 5173 --host 0.0.0.0
 :wait
 set /a n=0
 :waitapi

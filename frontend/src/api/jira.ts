@@ -160,6 +160,8 @@ export interface JiraIssueThread {
   reporter: JiraCommentAuthor | null
   assignee: JiraCommentAuthor | null
   creator: JiraCommentAuthor | null
+  description: string
+  created: string
   comments: JiraIssueComment[]
 }
 
@@ -173,7 +175,7 @@ function asJiraPerson(value: unknown): JiraCommentAuthor | null {
 
 export function getJiraIssueThread(jiraKey: string) {
   return fetch(
-    `/jira-rest/rest/api/2/issue/${encodeURIComponent(jiraKey)}?fields=comment,reporter,assignee,creator`,
+    `/jira-rest/rest/api/2/issue/${encodeURIComponent(jiraKey)}?fields=description,created,comment,reporter,assignee,creator`,
   ).then(async (response) => {
     if (!response.ok) throw new Error('jira comments failed')
     const data = await response.json()
@@ -182,6 +184,8 @@ export function getJiraIssueThread(jiraKey: string) {
       reporter: asJiraPerson(data?.fields?.reporter),
       assignee: asJiraPerson(data?.fields?.assignee),
       creator: asJiraPerson(data?.fields?.creator),
+      description: String(data?.fields?.description ?? ''),
+      created: String(data?.fields?.created ?? ''),
       comments: comments.map((row: { id?: string; body?: string; created?: string; author?: JiraCommentAuthor }) => ({
         id: String(row.id ?? ''),
         body: String(row.body ?? ''),

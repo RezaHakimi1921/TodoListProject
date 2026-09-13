@@ -41,6 +41,7 @@ public sealed class ProblemRecord
     public string? InfiniteTimeNote { get; set; }
     public int? ChosenOptionId { get; set; }
     public string? PremortemSign { get; set; }
+    public string? Reality { get; set; }
     public string? ExpectedBehavior { get; set; }
     public string? ActualBehavior { get; set; }
     public string? RootCause { get; set; }

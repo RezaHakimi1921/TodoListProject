@@ -73,7 +73,17 @@ export function jalaliToGregorian(jy: number, jm: number, jd: number) {
   return { gy, gm, gd }
 }
 
+export function todayJalali() {
+  const now = new Date()
+  return gregorianToJalali(now.getFullYear(), now.getMonth() + 1, now.getDate())
+}
+
+export function isIsoDate(iso?: string | null): iso is string {
+  return Boolean(iso && /^\d{4}-\d{2}-\d{2}$/.test(iso))
+}
+
 export function isoToJalali(iso: string) {
+  if (!isIsoDate(iso)) return todayJalali()
   const [gy, gm, gd] = iso.split('-').map(Number)
   return gregorianToJalali(gy, gm, gd)
 }

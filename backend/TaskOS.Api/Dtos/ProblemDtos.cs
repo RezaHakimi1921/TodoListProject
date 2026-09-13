@@ -39,6 +39,7 @@ public sealed class ProblemDto
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
+    public string? Reality { get; set; }
     public string? ExpectedBehavior { get; set; }
     public string? ActualBehavior { get; set; }
     public string? RootCause { get; set; }
@@ -89,6 +90,7 @@ public sealed class UpdateProblemRequest
 {
     public string Title { get; set; } = string.Empty;
     public string? Status { get; set; }
+    public string? Reality { get; set; }
     public string? ExpectedBehavior { get; set; }
     public string? ActualBehavior { get; set; }
     public string? RootCause { get; set; }

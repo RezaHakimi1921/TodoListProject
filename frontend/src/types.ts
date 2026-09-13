@@ -134,6 +134,7 @@ export interface Problem {
   id: number
   title: string
   status: ProblemStatus
+  reality?: string | null
   expectedBehavior?: string | null
   actualBehavior?: string | null
   rootCause?: string | null

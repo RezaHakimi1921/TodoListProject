@@ -8,10 +8,16 @@ export interface AppSettings {
 
 export const DEFAULT_PING_MINUTES = 10
 
-function normalize(row: Partial<AppSettings> & { pingMinutes?: number }): AppSettings {
+function normalize(row: Partial<AppSettings> & { pingMinutes?: number; paused?: unknown }): AppSettings {
+  const rawPaused = row.paused
+  const paused =
+    rawPaused === true
+    || rawPaused === 1
+    || rawPaused === '1'
+    || rawPaused === 'true'
   return {
     pingMinutes: Number(row.pingMinutes ?? DEFAULT_PING_MINUTES) || DEFAULT_PING_MINUTES,
-    paused: Boolean(row.paused),
+    paused,
     lastPingAt: row.lastPingAt ?? null,
   }
 }
@@ -29,5 +35,12 @@ export function ackPing() {
 }
 
 export function testToast() {
-  return api.post<AppSettings>('/api/settings/test-toast', {}).then(normalize)
+  return api
+    .post<{ ok?: boolean; sent?: number }>('/api/push/test', {
+      title: 'یادآوری تمرکز',
+      body: 'الان روی چه کاری وقت گذاشتی؟',
+    })
+    .catch(() => undefined)
+    .then(() => api.post<AppSettings>('/api/settings/test-toast', {}).catch(() => getSettings()))
+    .then((row) => (row && 'pingMinutes' in row ? normalize(row) : getSettings()))
 }

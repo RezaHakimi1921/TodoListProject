@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS Problem (
     InfiniteTimeNote TEXT NULL,
     ChosenOptionId INTEGER NULL,
     PremortemSign TEXT NULL,
+    Reality TEXT NULL,
     ExpectedBehavior TEXT NULL,
     ActualBehavior TEXT NULL,
     RootCause TEXT NULL,
@@ -173,3 +174,10 @@ CREATE TABLE IF NOT EXISTS JiraCommentInbox (
 
 CREATE INDEX IF NOT EXISTS IX_JiraCommentInbox_SeenAt ON JiraCommentInbox(SeenAt);
 CREATE INDEX IF NOT EXISTS IX_JiraCommentInbox_TaskId ON JiraCommentInbox(TaskId);
+
+CREATE TABLE IF NOT EXISTS PushSubscription (
+    Endpoint TEXT PRIMARY KEY,
+    P256dh TEXT NOT NULL,
+    Auth TEXT NOT NULL,
+    CreatedAt TEXT NOT NULL
+);

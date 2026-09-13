@@ -31,7 +31,7 @@ public sealed class SettingsService : ISettingsService
         return new AppSettingsDto
         {
             PingMinutes = ParsePing(Get(rows, "PingMinutes")),
-            Paused = Get(rows, "Paused") != "0",
+            Paused = Get(rows, "Paused") == "1",
             LastPingAt = Get(rows, "LastPingAt")
         };
     }

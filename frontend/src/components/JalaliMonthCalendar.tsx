@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import {
   isoToJalali,
+  isIsoDate,
   jalaliMonthLength,
   jalaliToIso,
   JALALI_MONTHS,
@@ -80,7 +81,7 @@ export function JalaliMonthCalendar({ value, max, marked, compact, onChange }: P
         {cells.map((cell, index) => {
           if (!cell) return <span key={`e-${index}`} />
           const disabled = Boolean(max && cell.iso > max)
-          const isSelected = cell.iso === value
+          const isSelected = isIsoDate(value) && cell.iso === value
           const hasTasks = marked?.has(cell.iso)
           return (
             <button

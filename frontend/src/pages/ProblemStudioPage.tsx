@@ -26,117 +26,21 @@ import { fetchJiraIssueSummary, registerJiraIssue } from '../api/jira'
 import { getTask, listTasks } from '../api/tasks'
 import { EntityWorkLogs } from '../components/EntityWorkLogs'
 import { useTrashConfirm } from '../components/ConfirmProvider'
-import { GOLD_QUESTIONS, PROBLEM_STATUS_LABEL, STATUS_LABEL, type ProblemStatus, type TaskItem } from '../types'
+import { GOLD_QUESTIONS, PROBLEM_STATUS_LABEL, STATUS_LABEL, type Problem, type ProblemStatus, type TaskItem } from '../types'
 import { requestProblemFocus } from '../lib/focusSwitch'
+import { JalaliDateField } from '../components/JalaliDateField'
+import { ProblemCoachCard, SectionGuide } from '../components/ProblemCoachCard'
+import { PROBLEM_SECTIONS } from '../lib/problemSections'
 import { formatPersianDateTime } from '../lib/dates'
 
 const STATUSES: ProblemStatus[] = ['Open', 'Monitoring', 'Resolved']
-
-type FieldKey = Exclude<keyof ProblemDraft, 'title' | 'status'>
-
-const SECTIONS: Array<{
-  id: string
-  title: string
-  hint: string
-  fields: Array<{ key: FieldKey; label: string; rows?: number; date?: boolean }>
-}> = [
-  {
-    id: 'expected',
-    title: '۲. رفتار مورد انتظار',
-    hint: 'چه چیزی باید اتفاق می‌افتاد؟',
-    fields: [{ key: 'expectedBehavior', label: 'حالت درست فرآیند', rows: 3 }],
-  },
-  {
-    id: 'actual',
-    title: '۳. رفتار واقعی',
-    hint: 'بدون حدس و راه‌حل بنویس دقیقاً چه رخ داده.',
-    fields: [{ key: 'actualBehavior', label: 'چه اتفاقی افتاد؟ کجا دیده شد؟', rows: 4 }],
-  },
-  {
-    id: 'impact',
-    title: '۴. اثر و Side Effect',
-    hint: 'فقط همین مورد بوده یا هر چیزی زیر همین شرایط ممکن است خراب باشد؟',
-    fields: [
-      { key: 'impactBranches', label: 'مجموعه‌ها / Branches' },
-      { key: 'impactCustomers', label: 'مشتری‌ها' },
-      { key: 'impactRecords', label: 'رکوردها' },
-      { key: 'impactServices', label: 'سرویس‌ها' },
-      { key: 'impactSupport', label: 'زمان پشتیبانی' },
-      { key: 'impactBusiness', label: 'اثر کسب‌وکار' },
-    ],
-  },
-  {
-    id: 'timeline',
-    title: '۵. Timeline',
-    hint: 'دنبال شروع مشکل باش، نه فقط زمان کشف.',
-    fields: [
-      { key: 'startedAt', label: 'شروع مشکل', date: true },
-      { key: 'firstAffectedAt', label: 'اولین مورد درگیر', date: true },
-      { key: 'detectedAt', label: 'کشف شد', date: true },
-      { key: 'rootCauseFoundAt', label: 'علت پیدا شد', date: true },
-      { key: 'fixedAt', label: 'اصلاح شد', date: true },
-      { key: 'recoveryCompletedAt', label: 'Recovery تمام شد', date: true },
-    ],
-  },
-  {
-    id: 'root',
-    title: '۶. علت اصلی',
-    hint: 'چرا؟ را چند بار بپرس. «کانورتور خراب بود» هنوز علت اصلی نیست.',
-    fields: [{ key: 'rootCause', label: 'Root Cause', rows: 4 }],
-  },
-  {
-    id: 'detect',
-    title: '۷. چرا زودتر نفهمیدیم؟',
-    hint: 'چرا سیستم به ما نگفت و انسان مجبور شد متوجه شود؟',
-    fields: [{ key: 'detectionGap', label: 'شکاف Detection', rows: 3 }],
-  },
-  {
-    id: 'affected',
-    title: '۸. جمعیت درگیر',
-    hint: 'از StartDate تا FixDate چه مواردی تحت تأثیر بودند؟',
-    fields: [{ key: 'affectedPopulation', label: 'فهرست موارد / لاگ برای بقیه', rows: 4 }],
-  },
-  {
-    id: 'resolution',
-    title: '۹. Resolution',
-    hint: 'چه کاری برای رفع ریشه انجام شد؟ با Recovery یکی نیست.',
-    fields: [{ key: 'resolution', label: 'چه کردیم', rows: 3 }],
-  },
-  {
-    id: 'recovery',
-    title: '۱۰. Recovery گذشته',
-    hint: 'Problem Fixed ≠ Historical Data Fixed',
-    fields: [{ key: 'recovery', label: 'موارد قبلی چگونه اصلاح شدند؟', rows: 3 }],
-  },
-  {
-    id: 'validation',
-    title: '۱۱. Validation',
-    hint: 'از کجا مطمئن شدیم مشکل کاملاً حل شده؟',
-    fields: [{ key: 'validationNote', label: 'نشانه صحت', rows: 3 }],
-  },
-  {
-    id: 'cost',
-    title: '۱۲. هزینه',
-    hint: 'فنی / عملیاتی / کسب‌وکار / فرصت ازدست‌رفته',
-    fields: [
-      { key: 'costTechnical', label: 'Technical' },
-      { key: 'costOperational', label: 'Operational' },
-      { key: 'costBusiness', label: 'Business' },
-      { key: 'costOpportunity', label: 'Opportunity' },
-    ],
-  },
-  {
-    id: 'prevention',
-    title: '۱۳. Prevention',
-    hint: 'دفعه بعد چه چیزی باید قبل از مشتری یا پشتیبانی به ما بگوید؟',
-    fields: [{ key: 'prevention', label: 'چه باید تغییر کند', rows: 3 }],
-  },
-]
+const SECTIONS = PROBLEM_SECTIONS
 
 function emptyDraft(): ProblemDraft & { title: string; status: ProblemStatus } {
   return {
     title: '',
     status: 'Open',
+    reality: '',
     expectedBehavior: '',
     actualBehavior: '',
     rootCause: '',
@@ -162,6 +66,40 @@ function emptyDraft(): ProblemDraft & { title: string; status: ProblemStatus } {
     costOperational: '',
     costBusiness: '',
     costOpportunity: '',
+  }
+}
+
+function draftFromProblem(problem: Problem): ProblemDraft & { title: string; status: ProblemStatus } {
+  return {
+    ...emptyDraft(),
+    title: problem.title,
+    status: problem.status,
+    reality: problem.reality ?? problem.noTimeNote ?? '',
+    expectedBehavior: problem.expectedBehavior ?? '',
+    actualBehavior: problem.actualBehavior ?? '',
+    rootCause: problem.rootCause ?? '',
+    detectionGap: problem.detectionGap ?? '',
+    affectedPopulation: problem.affectedPopulation ?? '',
+    resolution: problem.resolution ?? '',
+    recovery: problem.recovery ?? '',
+    validationNote: problem.validationNote ?? '',
+    prevention: problem.prevention ?? '',
+    impactBranches: problem.impactBranches ?? '',
+    impactCustomers: problem.impactCustomers ?? '',
+    impactRecords: problem.impactRecords ?? '',
+    impactServices: problem.impactServices ?? '',
+    impactSupport: problem.impactSupport ?? '',
+    impactBusiness: problem.impactBusiness ?? '',
+    startedAt: (problem.startedAt ?? '').slice(0, 10),
+    firstAffectedAt: (problem.firstAffectedAt ?? '').slice(0, 10),
+    detectedAt: (problem.detectedAt ?? '').slice(0, 10),
+    rootCauseFoundAt: (problem.rootCauseFoundAt ?? '').slice(0, 10),
+    fixedAt: (problem.fixedAt ?? '').slice(0, 10),
+    recoveryCompletedAt: (problem.recoveryCompletedAt ?? '').slice(0, 10),
+    costTechnical: problem.costTechnical ?? '',
+    costOperational: problem.costOperational ?? '',
+    costBusiness: problem.costBusiness ?? '',
+    costOpportunity: problem.costOpportunity ?? '',
   }
 }
 
@@ -202,57 +140,41 @@ export function ProblemStudioPage() {
       skipHydrate.current = false
       return
     }
-    const next = {
-      ...emptyDraft(),
-      title: problem.title,
-      status: problem.status,
-      expectedBehavior: problem.expectedBehavior ?? '',
-      actualBehavior: problem.actualBehavior ?? '',
-      rootCause: problem.rootCause ?? '',
-      detectionGap: problem.detectionGap ?? '',
-      affectedPopulation: problem.affectedPopulation ?? '',
-      resolution: problem.resolution ?? '',
-      recovery: problem.recovery ?? '',
-      validationNote: problem.validationNote ?? '',
-      prevention: problem.prevention ?? '',
-      impactBranches: problem.impactBranches ?? '',
-      impactCustomers: problem.impactCustomers ?? '',
-      impactRecords: problem.impactRecords ?? '',
-      impactServices: problem.impactServices ?? '',
-      impactSupport: problem.impactSupport ?? '',
-      impactBusiness: problem.impactBusiness ?? '',
-      startedAt: (problem.startedAt ?? '').slice(0, 10),
-      firstAffectedAt: (problem.firstAffectedAt ?? '').slice(0, 10),
-      detectedAt: (problem.detectedAt ?? '').slice(0, 10),
-      rootCauseFoundAt: (problem.rootCauseFoundAt ?? '').slice(0, 10),
-      fixedAt: (problem.fixedAt ?? '').slice(0, 10),
-      recoveryCompletedAt: (problem.recoveryCompletedAt ?? '').slice(0, 10),
-      costTechnical: problem.costTechnical ?? '',
-      costOperational: problem.costOperational ?? '',
-      costBusiness: problem.costBusiness ?? '',
-      costOpportunity: problem.costOpportunity ?? '',
-    }
+    const next = draftFromProblem(problem)
     setDraft(next)
     setSectionSavedAt(problem.sectionSavedAt ?? {})
     setLastSavedAt(problem.updatedAt)
     setOpenSections(
-      new Set(
-        SECTIONS.filter((section) =>
+      new Set([
+        'reality',
+        ...SECTIONS.filter((section) =>
           section.fields.some((field) => Boolean((next[field.key] ?? '').toString().trim())),
         ).map((section) => section.id),
-      ),
+      ]),
     )
   }, [problem])
 
   const saveMutation = useMutation({
     mutationFn: async (sectionId?: string) => {
       setSaveError('')
-      const stamps = { ...sectionSavedAt }
+      const latest = await getProblem(problemId)
+      const payload = draftFromProblem(latest)
+      payload.title = draft.title || latest.title
+      payload.status = draft.status
+      const section = SECTIONS.find((item) => item.id === sectionId)
+      for (const field of section?.fields ?? []) {
+        payload[field.key] = draft[field.key]
+      }
+      const stamps = { ...(latest.sectionSavedAt ?? {}), ...sectionSavedAt }
       if (sectionId) stamps[sectionId] = new Date().toISOString()
-      const saved = await updateProblem(problemId, { ...draft, sectionSavedAt: stamps })
-      const wrote =
-        Boolean(saved.expectedBehavior || saved.actualBehavior || saved.rootCause || saved.title === draft.title)
-      if (draft.expectedBehavior.trim() && saved.expectedBehavior !== draft.expectedBehavior) {
+      const saved = await updateProblem(problemId, { ...payload, sectionSavedAt: stamps })
+      if (
+        section?.fields.some((field) => {
+          const left = String(draft[field.key] ?? '')
+          const right = String(saved[field.key] ?? '')
+          return field.date ? left.slice(0, 10) !== right.slice(0, 10) : left !== right
+        })
+      ) {
         throw new Error('یادداشت ذخیره نشد. چند ثانیه بعد دوباره ثبت را بزن.')
       }
       skipHydrate.current = true
@@ -260,7 +182,7 @@ export function ProblemStudioPage() {
       setSectionSavedAt(saved.sectionSavedAt ?? stamps)
       setLastSavedAt(saved.updatedAt)
       void queryClient.invalidateQueries({ queryKey: ['problems'] })
-      return wrote ? saved : saved
+      return saved
     },
     onError: (error) => {
       setSaveError(error instanceof Error ? error.message : 'ثبت انجام نشد.')
@@ -372,6 +294,8 @@ export function ProblemStudioPage() {
         </ol>
       </section>
 
+      <ProblemCoachCard draft={draft} actions={problem.actions ?? []} />
+
       <section className="space-y-3 rounded-2xl border border-white/[0.08] bg-[#141824] p-5">
         <p className="text-[11px] font-semibold text-slate-400">۱۵. وضعیت نهایی</p>
         <div className="flex flex-wrap gap-1.5">
@@ -381,7 +305,9 @@ export function ProblemStudioPage() {
               type="button"
               onClick={() => {
                 setDraft((prev) => ({ ...prev, status }))
-                void updateProblem(problemId, { ...draft, status }).then(refreshProblem)
+                void getProblem(problemId)
+                  .then((latest) => updateProblem(problemId, { ...draftFromProblem(latest), title: draft.title || latest.title, status }))
+                  .then(refreshProblem)
               }}
               className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
                 draft.status === status
@@ -393,12 +319,13 @@ export function ProblemStudioPage() {
             </button>
           ))}
         </div>
-        <label className="block text-[11px] font-semibold text-slate-400">۱. مسئله — دقیقاً چه مشکلی رخ داده؟</label>
+        <label className="block text-[11px] font-semibold text-slate-400">نام کوتاه مسئله</label>
         <input
           value={draft.title}
           onChange={(event) => setField('title', event.target.value)}
           className="w-full rounded-xl border border-white/10 bg-black/30 p-3 text-base font-bold text-white focus:border-amber-400/50 focus:outline-none"
         />
+        <p className="mt-1 text-[11px] text-slate-500">فقط اسم. شرح واقعیت را در بخش ۱ پایین بنویس.</p>
         <SaveBar
           pending={saveMutation.isPending}
           error={saveError}
@@ -540,11 +467,9 @@ export function ProblemStudioPage() {
                   <label key={field.key} className={field.rows || section.fields.length === 1 ? 'sm:col-span-2' : ''}>
                     <span className="mb-1 block text-[11px] font-medium text-slate-400">{field.label}</span>
                     {field.date ? (
-                      <input
-                        type="date"
+                      <JalaliDateField
                         value={draft[field.key] ?? ''}
-                        onChange={(event) => setField(field.key, event.target.value)}
-                        className="w-full rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-100 focus:border-amber-400/40 focus:outline-none"
+                        onChange={(iso) => setField(field.key, iso)}
                       />
                     ) : (
                       <textarea
@@ -554,12 +479,14 @@ export function ProblemStudioPage() {
                         className="w-full rounded-xl border border-white/10 bg-black/30 p-2.5 text-xs leading-relaxed text-slate-100 placeholder-slate-600 focus:border-amber-400/40 focus:outline-none"
                       />
                     )}
+                    {field.expect ? <p className="mt-1 text-[10px] leading-relaxed text-slate-500">{field.expect}</p> : null}
                   </label>
                 ))}
+                <SectionGuide section={section} draft={draft} />
                 <div className="sm:col-span-2">
                   <SaveBar
                     pending={saveMutation.isPending}
-                    error={saveError}
+                    error={saveMutation.variables === section.id ? saveError : undefined}
                     savedAt={sectionSavedAt[section.id] || lastSavedAt}
                     label="ثبت این بخش"
                     onSave={() => saveMutation.mutate(section.id)}
@@ -572,7 +499,10 @@ export function ProblemStudioPage() {
       })}
 
       <section className="rounded-2xl border border-white/[0.08] bg-[#141824] p-5">
-        <h2 className="mb-3 text-sm font-bold text-white">۱۴. Action Items</h2>
+        <h2 className="mb-1 text-sm font-bold text-white">۱۴. Action Items</h2>
+        <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+          اقدام یعنی کار باقی‌مانده با صاحب و مهلت. «ارتباط گرفتم و تمام شد» را Done کن و کار بعدی را جدا بنویس.
+        </p>
         <div className="mb-3 grid gap-2 sm:grid-cols-[1fr_8rem_8rem_auto]">
           <input
             value={actionTitle}
@@ -586,12 +516,7 @@ export function ProblemStudioPage() {
             placeholder="مسئول"
             className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-100"
           />
-          <input
-            type="date"
-            value={actionDeadline}
-            onChange={(event) => setActionDeadline(event.target.value)}
-            className="rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-xs text-slate-100"
-          />
+          <JalaliDateField value={actionDeadline} onChange={setActionDeadline} placeholder="مهلت" />
           <button
             type="button"
             disabled={!actionTitle.trim()}

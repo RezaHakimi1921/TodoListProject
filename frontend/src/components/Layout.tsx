@@ -23,6 +23,7 @@ import { useFocusTaskStatus } from '../hooks/useFocusTaskStatus'
 import { useJiraClosedTasks } from '../hooks/useJiraClosedTasks'
 import { NotificationToasts } from './NotificationToasts'
 import { NowWorkingBanner } from './NowWorkingBanner'
+import { ThemeToggle } from './ThemeToggle'
 
 export function Layout() {
   useFocusTaskStatus()
@@ -108,6 +109,13 @@ export function Layout() {
               <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.07] text-slate-400">
                 <span className="text-slate-300 font-medium">{todayStr}</span>
               </div>
+              <ThemeToggle compact />
+              <Link
+                to="/settings#phone"
+                className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-1.5 text-slate-300 hover:border-amber-400/30 hover:text-amber-100"
+              >
+                <span className="font-medium">گوشی</span>
+              </Link>
 
               {activeTasksCount > 0 && (
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/[0.03] border border-white/[0.07] text-slate-300">

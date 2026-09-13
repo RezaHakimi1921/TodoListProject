@@ -63,6 +63,7 @@ public sealed class ProblemService : IProblemService
         {
             row.Status = ProblemStatuses.Normalize(request.Status);
         }
+        row.Reality = EmptyToNull(request.Reality ?? request.NoTimeNote);
         row.ExpectedBehavior = EmptyToNull(request.ExpectedBehavior);
         row.ActualBehavior = EmptyToNull(request.ActualBehavior);
         row.RootCause = EmptyToNull(request.RootCause);
@@ -89,7 +90,7 @@ public sealed class ProblemService : IProblemService
         row.CostBusiness = EmptyToNull(request.CostBusiness);
         row.CostOpportunity = EmptyToNull(request.CostOpportunity);
         row.SectionSavedAt = EmptyToNull(request.SectionSavedAt);
-        row.NoTimeNote = EmptyToNull(request.NoTimeNote);
+        row.NoTimeNote = EmptyToNull(request.Reality ?? request.NoTimeNote);
         row.InfiniteTimeNote = EmptyToNull(request.InfiniteTimeNote);
         row.UpdatedAt = TaskMapping.Now();
         await _problems.UpdateAsync(row);
@@ -258,6 +259,7 @@ public sealed class ProblemService : IProblemService
             Id = row.Id,
             Title = row.Title,
             Status = ProblemStatuses.Normalize(row.Status),
+            Reality = row.Reality ?? row.NoTimeNote,
             ExpectedBehavior = row.ExpectedBehavior,
             ActualBehavior = row.ActualBehavior,
             RootCause = row.RootCause,

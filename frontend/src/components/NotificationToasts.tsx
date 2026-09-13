@@ -10,6 +10,12 @@ import {
   type CommentNotification,
 } from '../api/notifications'
 
+function isFreshNotification(item: CommentNotification) {
+  const at = Date.parse(item.createdAt)
+  if (!Number.isFinite(at)) return false
+  return Date.now() - at < 5 * 60 * 1000
+}
+
 export function NotificationToasts() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -29,6 +35,10 @@ export function NotificationToasts() {
     const unreadIds = new Set(items.map((item) => item.id))
     if (knownIds.current === null) {
       knownIds.current = unreadIds
+      const recent = items.filter(isFreshNotification)
+      if (recent.length > 0) {
+        setToasts(recent.slice(0, 4))
+      }
       return
     }
     const fresh = items.filter((item) => !knownIds.current!.has(item.id))

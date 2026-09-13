@@ -9,8 +9,10 @@ import {
   Check, 
   Database, 
   Monitor,
-  Sparkles
+  Sparkles,
 } from 'lucide-react'
+import { PhoneAccessCard } from '../components/PhoneAccessCard'
+import { ThemeToggle } from '../components/ThemeToggle'
 import { getSettings, saveSettings, testToast } from '../api/settings'
 
 export function SettingsPage() {
@@ -67,6 +69,15 @@ export function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="rounded-3xl border border-[#212738] bg-[#141824] p-6 shadow-xl space-y-4">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-amber-400" />
+            <h2 className="text-base font-bold text-white">ظاهر برنامه</h2>
+          </div>
+          <p className="text-xs text-slate-400">حالت روشن برای روز و حالت تیره برای شب. انتخاب روی همین مرورگر می‌ماند.</p>
+          <ThemeToggle />
+        </div>
+
         {/* Work Ping Settings */}
         <div className="rounded-3xl border border-[#212738] bg-[#141824] p-6 shadow-xl space-y-5">
           <div className="flex items-center gap-2">
@@ -130,10 +141,10 @@ export function SettingsPage() {
               className="px-4 py-2 rounded-xl bg-[#1a2030] hover:bg-[#232b40] text-slate-300 border border-slate-700 text-xs font-medium transition-colors"
             >
               {toastMutation.isPending
-                ? 'در حال باز شدن فرم...'
+                ? 'در حال ارسال...'
                 : toastSent
                   ? 'ارسال شد!'
-                  : 'تست اعلان Toast ویندوز'}
+                  : 'تست اعلان ویندوز'}
             </button>
             {toastMutation.isError && (
               <p className="text-[11px] text-rose-400">
@@ -165,6 +176,8 @@ export function SettingsPage() {
           </div>
 
           <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
+            <PhoneAccessCard />
+
             <div className="p-3.5 rounded-2xl bg-[#0f121a] border border-slate-800 space-y-1">
               <span className="font-bold text-slate-100 flex items-center gap-1.5">
                 <Database className="w-3.5 h-3.5 text-amber-400" />

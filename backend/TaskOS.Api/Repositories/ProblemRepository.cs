@@ -8,7 +8,7 @@ public sealed class ProblemRepository : IProblemRepository
 {
     private const string ProblemColumns = """
         Id, Title, Status, NoTimeNote, InfiniteTimeNote, ChosenOptionId, PremortemSign,
-        ExpectedBehavior, ActualBehavior, RootCause, DetectionGap, AffectedPopulation,
+        Reality, ExpectedBehavior, ActualBehavior, RootCause, DetectionGap, AffectedPopulation,
         Resolution, Recovery, ValidationNote, Prevention,
         ImpactBranches, ImpactCustomers, ImpactRecords, ImpactServices, ImpactSupport, ImpactBusiness,
         StartedAt, FirstAffectedAt, DetectedAt, RootCauseFoundAt, FixedAt, RecoveryCompletedAt,
@@ -67,6 +67,7 @@ public sealed class ProblemRepository : IProblemRepository
                 InfiniteTimeNote = @InfiniteTimeNote,
                 ChosenOptionId = @ChosenOptionId,
                 PremortemSign = @PremortemSign,
+                Reality = @Reality,
                 ExpectedBehavior = @ExpectedBehavior,
                 ActualBehavior = @ActualBehavior,
                 RootCause = @RootCause,

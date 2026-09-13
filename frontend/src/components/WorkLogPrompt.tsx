@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Bell, ClipboardList, HelpCircle, Power } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createProblem, listProblems } from '../api/problems'
 import { createTask, getTask, listTasks, updateTaskStatus } from '../api/tasks'
@@ -56,6 +57,7 @@ export function WorkLogPrompt() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [error, setError] = useState('')
   const [eta, setEta] = useState(() => minutesUntilPing(pingMinutes, lastPingAt))
+  const dueNotifiedAt = useRef<string | null>(null)
 
   const focusQuery = useQuery({ queryKey: ['focus'], queryFn: getFocus, refetchInterval: 30_000 })
   const focusTaskQuery = useQuery({
@@ -134,6 +136,14 @@ export function WorkLogPrompt() {
     const timer = window.setInterval(tick, CHECK_MS)
     return () => window.clearInterval(timer)
   }, [pingMinutes, lastPingAt])
+
+  useEffect(() => {
+    if (paused || !lastPingAt || eta > 0) return
+    if (dueNotifiedAt.current === lastPingAt) return
+    dueNotifiedAt.current = lastPingAt
+    openPrompt('Timer')
+    void testToast().catch(() => undefined)
+  }, [eta, paused, lastPingAt])
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['focus'] })
@@ -259,34 +269,37 @@ export function WorkLogPrompt() {
 
   return (
     <>
-      <div className="fixed bottom-4 inset-x-4 z-30 flex max-w-[min(100%-2rem,42rem)] flex-wrap justify-center gap-2 sm:inset-x-auto sm:left-4 sm:justify-start">
+      <div className="work-dock fixed bottom-4 inset-x-4 z-30 flex max-w-[min(100%-2rem,52rem)] flex-wrap items-center justify-center gap-2 sm:inset-x-auto sm:left-4 sm:justify-start">
         {current && (
-          <span className="max-w-[min(70vw,18rem)] truncate rounded-full bg-ember/20 px-3 py-2 text-xs text-amber-100">
+          <span className="work-dock-chip max-w-[min(70vw,18rem)] truncate rounded-full border px-3 py-2 text-xs font-medium">
             الان: {current}
           </span>
         )}
         <button
           type="button"
           onClick={() => openPrompt('Manual')}
-          className="rounded-full bg-ember px-4 py-2 text-sm font-semibold text-ink-950 shadow-lg"
+          className="work-dock-log inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-bold shadow-lg"
         >
+          <ClipboardList className="h-4 w-4" />
           ثبت کار
         </button>
         <button
           type="button"
           onClick={() => openPrompt('Manual', 'problem')}
-          className="rounded-full bg-ink-800 px-4 py-2 text-sm shadow-lg"
+          className="work-dock-problem inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold shadow-lg"
         >
+          <HelpCircle className="h-4 w-4" />
           مسئله دارم
         </button>
         <button
           type="button"
           onClick={() => setPausedAndSave(!paused)}
-          className={`rounded-full px-4 py-2 text-sm shadow-lg ${
-            paused ? 'bg-rose-500 text-white' : 'bg-moss text-white'
+          className={`work-dock-ping inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold shadow-lg ${
+            paused ? 'is-off' : 'is-on'
           }`}
         >
-          {paused ? 'سیستم خاموش' : 'سیستم روشن'}
+          <Power className="h-4 w-4" />
+          {paused ? 'یادآوری خاموش' : 'یادآوری روشن'}
         </button>
         <button
           type="button"
@@ -295,12 +308,13 @@ export function WorkLogPrompt() {
               void queryClient.invalidateQueries({ queryKey: ['settings'] })
             })
           }}
-          className="rounded-full bg-ink-800 px-4 py-2 text-sm shadow-lg"
+          className="work-dock-test inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold shadow-lg"
         >
+          <Bell className="h-4 w-4" />
           تست نوتیف
         </button>
-        <span className="self-center text-xs text-paper/40">
-          {paused ? 'سیستم خاموش است' : `هر ${pingMinutes} دقیقه · بعدی ${eta} دقیقه`}
+        <span className={`work-dock-eta self-center rounded-full px-3 py-1.5 text-xs font-medium ${paused ? 'is-off' : ''}`}>
+          {paused ? 'یادآوری‌ها قطع است' : `هر ${pingMinutes} دقیقه · بعدی ${eta} دقیقه`}
         </span>
       </div>
 

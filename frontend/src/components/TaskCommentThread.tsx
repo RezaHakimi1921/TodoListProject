@@ -4,6 +4,7 @@ import { Globe, Lock, MessageCircle, Trash2, UserRound } from 'lucide-react'
 import { addJiraIssueComment, getJiraIssueThread, isJiraMe, type JiraCommentAuthor } from '../api/jira'
 import { addTimeline, deleteTimeline, listTimeline } from '../api/tasks'
 import { formatPersianDateTime } from '../lib/dates'
+import { jiraWikiToText } from '../lib/jira'
 import { markTaskNotificationsRead } from '../api/notifications'
 
 interface Props {
@@ -28,8 +29,35 @@ function personName(person?: JiraCommentAuthor | null) {
 }
 
 function displayBody(body: string) {
-  const text = body.replace(/!([^!]+)!/g, '📎 تصویر').replace(/\s+/g, ' ').trim()
-  return text || '📎 تصویر'
+  const images = body.match(/!([^!\n]+)!/g)?.length ?? 0
+  const text = jiraWikiToText(body)
+  if (text && !/^📎 تصویر(?:\s*📎 تصویر)*$/.test(text)) return text
+  if (images > 1) return `📎 ${images} تصویر پیوست شده`
+  if (images === 1) return '📎 یک تصویر پیوست شده'
+  return text
+}
+
+function LinkedText({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s]+)/g)
+  return (
+    <p className="whitespace-pre-wrap text-slate-200">
+      {parts.map((part, index) =>
+        /^https?:\/\//.test(part) ? (
+          <a
+            key={`${part}-${index}`}
+            href={part}
+            target="_blank"
+            rel="noreferrer"
+            className="break-all text-sky-300 underline decoration-sky-300/40"
+          >
+            {part}
+          </a>
+        ) : (
+          <span key={`${part}-${index}`}>{part}</span>
+        ),
+      )}
+    </p>
+  )
 }
 
 export function TaskCommentThread({ taskId, jiraKey }: Props) {
@@ -118,6 +146,7 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
   const reporter = jiraQuery.data?.reporter
   const assignee = jiraQuery.data?.assignee
   const creator = jiraQuery.data?.creator
+  const description = jiraWikiToText(jiraQuery.data?.description)
 
   return (
     <div className="rounded-2xl border border-[#262f44] bg-[#141824] p-4">
@@ -145,6 +174,18 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
         </div>
       )}
 
+      {description ? (
+        <div className="mb-3 rounded-xl border border-sky-500/20 bg-sky-500/[0.07] px-3 py-2.5">
+          <p className="mb-1 text-[10px] font-semibold text-sky-300">
+            شرح تیکت
+            {jiraQuery.data?.created ? (
+              <span className="ms-2 font-normal text-slate-500">{formatPersianDateTime(jiraQuery.data.created)}</span>
+            ) : null}
+          </p>
+          <LinkedText text={description} />
+        </div>
+      ) : null}
+
       <div dir="ltr" className="max-h-72 overflow-y-auto space-y-2.5 px-0.5">
         {items.length === 0 ? (
           <p dir="rtl" className="py-6 text-center text-xs text-slate-500">
@@ -169,7 +210,7 @@ export function TaskCommentThread({ taskId, jiraKey }: Props) {
                   </span>
                   <span className="text-[10px] text-slate-500">{formatPersianDateTime(item.createdAt)}</span>
                 </div>
-                <p className="text-slate-200 whitespace-pre-wrap">{item.body}</p>
+                <LinkedText text={item.body} />
                 {item.localId != null && (
                   <button
                     type="button"

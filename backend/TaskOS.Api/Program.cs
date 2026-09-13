@@ -19,9 +19,12 @@ AppDomain.CurrentDomain.UnhandledException += (_, e) =>
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true);
+var pushOnly = args.Any(argument => string.Equals(argument, "--push-only", StringComparison.OrdinalIgnoreCase));
 if (!args.Any(argument => argument.Contains("urls", StringComparison.OrdinalIgnoreCase)))
 {
-    builder.WebHost.UseUrls("http://127.0.0.1:5088", "http://[::1]:5088");
+    builder.WebHost.UseUrls(
+        pushOnly ? "http://127.0.0.1:5108" : "http://127.0.0.1:5088",
+        pushOnly ? "http://[::1]:5108" : "http://[::1]:5088");
 }
 
 builder.Services.AddControllers();
@@ -67,21 +70,33 @@ builder.Services.AddScoped<IWorkPingService, WorkPingService>();
 builder.Services.AddSingleton<IJiraWatchService, JiraWatchService>();
 builder.Services.AddScoped<IJiraCommentInboxRepository, JiraCommentInboxRepository>();
 builder.Services.AddScoped<IJiraCommentInboxService, JiraCommentInboxService>();
+builder.Services.AddSingleton<IPushNotificationService, PushNotificationService>();
 builder.Services.AddScoped<JiraDoneCommentService>();
-builder.Services.AddHostedService<WorkPingHostedService>();
-builder.Services.AddHostedService<IncomingPsSyncHostedService>();
-builder.Services.AddHostedService<JiraWatchHostedService>();
-builder.Services.AddHostedService<JiraDoneCommentHostedService>();
+if (pushOnly)
+{
+    builder.Services.AddHostedService<PushInboxRelayHostedService>();
+    builder.Services.AddHostedService<WorkPingRelayHostedService>();
+}
+else
+{
+    builder.Services.AddHostedService<WorkPingHostedService>();
+    builder.Services.AddHostedService<IncomingPsSyncHostedService>();
+    builder.Services.AddHostedService<JiraWatchHostedService>();
+    builder.Services.AddHostedService<JiraDoneCommentHostedService>();
+}
 
 var app = builder.Build();
 app.Services.GetRequiredService<DatabaseInitializer>().Initialize();
-try
+if (!pushOnly)
 {
-    StartupInstaller.Ensure(app.Environment.ContentRootPath);
-}
-catch (Exception ex)
-{
-    app.Logger.LogWarning(ex, "Could not install Windows startup shortcut");
+    try
+    {
+        StartupInstaller.Ensure(app.Environment.ContentRootPath);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Could not install Windows startup shortcut");
+    }
 }
 app.UseCors();
 app.MapGet("/", () => Results.Content(

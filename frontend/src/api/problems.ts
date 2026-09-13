@@ -1,6 +1,19 @@
 import { api, ApiError } from './client'
 import type { Problem, ProblemActionItem, ProblemLink, ProblemStatus, ProblemTaskLink } from '../types'
 
+function pick(row: Record<string, unknown>, ...keys: string[]) {
+  for (const key of keys) {
+    const value = row[key]
+    if (value !== undefined && value !== null) return value
+  }
+  return null
+}
+
+function pickText(row: Record<string, unknown>, ...keys: string[]) {
+  const value = pick(row, ...keys)
+  return typeof value === 'string' ? value : value == null ? null : String(value)
+}
+
 function parseSavedAt(value: unknown): Record<string, string> | null {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     return value as Record<string, string>
@@ -50,46 +63,52 @@ function camelLink(row: Record<string, unknown>): ProblemLink {
 
 export function camelProblem(row: Record<string, unknown>): Problem {
   return {
-    id: Number(row.id),
-    title: String(row.title ?? ''),
-    status: asStatus(row.status),
-    expectedBehavior: (row.expectedBehavior as string | null) ?? null,
-    actualBehavior: (row.actualBehavior as string | null) ?? null,
-    rootCause: (row.rootCause as string | null) ?? null,
-    detectionGap: (row.detectionGap as string | null) ?? null,
-    affectedPopulation: (row.affectedPopulation as string | null) ?? null,
-    resolution: (row.resolution as string | null) ?? null,
-    recovery: (row.recovery as string | null) ?? null,
-    validationNote: (row.validationNote as string | null) ?? null,
-    prevention: (row.prevention as string | null) ?? null,
-    impactBranches: (row.impactBranches as string | null) ?? null,
-    impactCustomers: (row.impactCustomers as string | null) ?? null,
-    impactRecords: (row.impactRecords as string | null) ?? null,
-    impactServices: (row.impactServices as string | null) ?? null,
-    impactSupport: (row.impactSupport as string | null) ?? null,
-    impactBusiness: (row.impactBusiness as string | null) ?? null,
-    startedAt: (row.startedAt as string | null) ?? null,
-    firstAffectedAt: (row.firstAffectedAt as string | null) ?? null,
-    detectedAt: (row.detectedAt as string | null) ?? null,
-    rootCauseFoundAt: (row.rootCauseFoundAt as string | null) ?? null,
-    fixedAt: (row.fixedAt as string | null) ?? null,
-    recoveryCompletedAt: (row.recoveryCompletedAt as string | null) ?? null,
-    costTechnical: (row.costTechnical as string | null) ?? null,
-    costOperational: (row.costOperational as string | null) ?? null,
-    costBusiness: (row.costBusiness as string | null) ?? null,
-    costOpportunity: (row.costOpportunity as string | null) ?? null,
-    sectionSavedAt: parseSavedAt(row.sectionSavedAt),
-    taskCount: Number(row.taskCount ?? 0),
-    tasks: Array.isArray(row.tasks) ? (row.tasks as Record<string, unknown>[]).map(camelTask) : [],
-    actions: Array.isArray(row.actions) ? (row.actions as Record<string, unknown>[]).map(camelAction) : [],
-    createdAt: String(row.createdAt ?? ''),
-    updatedAt: String(row.updatedAt ?? ''),
+    id: Number(pick(row, 'id', 'Id') ?? 0),
+    title: String(pick(row, 'title', 'Title') ?? ''),
+    status: asStatus(pick(row, 'status', 'Status')),
+    reality: pickText(row, 'reality', 'Reality', 'noTimeNote', 'NoTimeNote'),
+    expectedBehavior: pickText(row, 'expectedBehavior', 'ExpectedBehavior'),
+    actualBehavior: pickText(row, 'actualBehavior', 'ActualBehavior'),
+    rootCause: pickText(row, 'rootCause', 'RootCause'),
+    detectionGap: pickText(row, 'detectionGap', 'DetectionGap'),
+    affectedPopulation: pickText(row, 'affectedPopulation', 'AffectedPopulation'),
+    resolution: pickText(row, 'resolution', 'Resolution'),
+    recovery: pickText(row, 'recovery', 'Recovery'),
+    validationNote: pickText(row, 'validationNote', 'ValidationNote'),
+    prevention: pickText(row, 'prevention', 'Prevention'),
+    impactBranches: pickText(row, 'impactBranches', 'ImpactBranches'),
+    impactCustomers: pickText(row, 'impactCustomers', 'ImpactCustomers'),
+    impactRecords: pickText(row, 'impactRecords', 'ImpactRecords'),
+    impactServices: pickText(row, 'impactServices', 'ImpactServices'),
+    impactSupport: pickText(row, 'impactSupport', 'ImpactSupport'),
+    impactBusiness: pickText(row, 'impactBusiness', 'ImpactBusiness'),
+    startedAt: pickText(row, 'startedAt', 'StartedAt'),
+    firstAffectedAt: pickText(row, 'firstAffectedAt', 'FirstAffectedAt'),
+    detectedAt: pickText(row, 'detectedAt', 'DetectedAt'),
+    rootCauseFoundAt: pickText(row, 'rootCauseFoundAt', 'RootCauseFoundAt'),
+    fixedAt: pickText(row, 'fixedAt', 'FixedAt'),
+    recoveryCompletedAt: pickText(row, 'recoveryCompletedAt', 'RecoveryCompletedAt'),
+    costTechnical: pickText(row, 'costTechnical', 'CostTechnical'),
+    costOperational: pickText(row, 'costOperational', 'CostOperational'),
+    costBusiness: pickText(row, 'costBusiness', 'CostBusiness'),
+    costOpportunity: pickText(row, 'costOpportunity', 'CostOpportunity'),
+    sectionSavedAt: parseSavedAt(pick(row, 'sectionSavedAt', 'SectionSavedAt')),
+    taskCount: Number(pick(row, 'taskCount', 'TaskCount') ?? 0),
+    tasks: Array.isArray(pick(row, 'tasks', 'Tasks'))
+      ? (pick(row, 'tasks', 'Tasks') as Record<string, unknown>[]).map(camelTask)
+      : [],
+    actions: Array.isArray(pick(row, 'actions', 'Actions'))
+      ? (pick(row, 'actions', 'Actions') as Record<string, unknown>[]).map(camelAction)
+      : [],
+    createdAt: String(pick(row, 'createdAt', 'CreatedAt') ?? ''),
+    updatedAt: String(pick(row, 'updatedAt', 'UpdatedAt') ?? ''),
   }
 }
 
 export type ProblemDraft = {
   title: string
   status?: ProblemStatus
+  reality?: string
   expectedBehavior?: string
   actualBehavior?: string
   rootCause?: string
@@ -135,6 +154,7 @@ export function updateProblem(id: number, input: ProblemDraft) {
   return api
     .put<Record<string, unknown>>(`/api/problems/${id}`, {
       ...input,
+      noTimeNote: input.reality,
       sectionSavedAt: input.sectionSavedAt ? JSON.stringify(input.sectionSavedAt) : undefined,
     })
     .then(camelProblem)
@@ -193,7 +213,7 @@ export function detachProblemTask(id: number, taskId: number) {
 }
 
 export function listProblemsForTask(taskId: number) {
-  return api.get<Record<string, unknown>[]>(`/api/tasks/${taskId}/problems`).then((rows) => rows.map(camelLink))
+  return api.get<Record<string, unknown>[]>(`/api/problems/by-task/${taskId}`).then((rows) => rows.map(camelLink))
 }
 
 export function camelProblemLink(row: Record<string, unknown>): ProblemLink {

@@ -21,6 +21,7 @@ public sealed class DatabaseInitializer
         ("Task", "Pinned", "INTEGER NOT NULL DEFAULT 0"),
         ("TaskJira", "AssigneeName", "TEXT NULL"),
         ("TaskJira", "AssigneeDisplay", "TEXT NULL"),
+        ("Problem", "Reality", "TEXT NULL"),
         ("Problem", "ExpectedBehavior", "TEXT NULL"),
         ("Problem", "ActualBehavior", "TEXT NULL"),
         ("Problem", "RootCause", "TEXT NULL"),
@@ -83,6 +84,7 @@ public sealed class DatabaseInitializer
         EnsureTaskJira(connection);
         EnsureJiraCommentInbox(connection);
         EnsureProblemInvestigation(connection);
+        EnsurePushSubscriptions(connection);
 
         if (!string.IsNullOrWhiteSpace(indexSql))
         {
@@ -264,5 +266,17 @@ public sealed class DatabaseInitializer
             ALTER TABLE Problem_mig RENAME TO Problem;
             """);
         Execute(connection, "PRAGMA foreign_keys = ON;");
+    }
+
+    private static void EnsurePushSubscriptions(SqliteConnection connection)
+    {
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS PushSubscription (
+                Endpoint TEXT PRIMARY KEY,
+                P256dh TEXT NOT NULL,
+                Auth TEXT NOT NULL,
+                CreatedAt TEXT NOT NULL
+            );
+            """);
     }
 }
