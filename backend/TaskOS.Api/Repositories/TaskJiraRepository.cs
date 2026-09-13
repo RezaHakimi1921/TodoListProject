@@ -15,7 +15,7 @@ public sealed class TaskJiraRepository : ITaskJiraRepository
     public async Task<TaskJiraRow?> GetByKeyAsync(string jiraKey)
     {
         const string sql = """
-            SELECT j.TaskId, j.JiraKey, j.JiraUrl, j.Description, j.OpenCount, j.LastSeenAt, t.Title, t.Status
+            SELECT j.TaskId, j.JiraKey, j.JiraUrl, j.Description, j.OpenCount, j.LastSeenAt, j.AssigneeName, j.AssigneeDisplay, t.Title, t.Status
             FROM TaskJira j
             JOIN Task t ON t.Id = j.TaskId
             WHERE j.JiraKey = @JiraKey AND t.DeletedAt IS NULL
@@ -27,7 +27,7 @@ public sealed class TaskJiraRepository : ITaskJiraRepository
     public async Task<TaskJiraRow?> GetByTaskIdAsync(int taskId)
     {
         const string sql = """
-            SELECT j.TaskId, j.JiraKey, j.JiraUrl, j.Description, j.OpenCount, j.LastSeenAt, t.Title, t.Status
+            SELECT j.TaskId, j.JiraKey, j.JiraUrl, j.Description, j.OpenCount, j.LastSeenAt, j.AssigneeName, j.AssigneeDisplay, t.Title, t.Status
             FROM TaskJira j
             JOIN Task t ON t.Id = j.TaskId
             WHERE j.TaskId = @TaskId AND t.DeletedAt IS NULL
@@ -44,7 +44,7 @@ public sealed class TaskJiraRepository : ITaskJiraRepository
         }
 
         const string sql = """
-            SELECT j.TaskId, j.JiraKey, j.JiraUrl, j.Description, j.OpenCount, j.LastSeenAt, t.Title, t.Status
+            SELECT j.TaskId, j.JiraKey, j.JiraUrl, j.Description, j.OpenCount, j.LastSeenAt, j.AssigneeName, j.AssigneeDisplay, t.Title, t.Status
             FROM TaskJira j
             JOIN Task t ON t.Id = j.TaskId
             WHERE t.DeletedAt IS NULL AND j.TaskId IN @Ids
@@ -74,5 +74,13 @@ public sealed class TaskJiraRepository : ITaskJiraRepository
             OpenCount = openCount,
             LastSeenAt = lastSeenAt
         });
+    }
+
+    public async Task SetAssigneeAsync(int taskId, string? name, string? display)
+    {
+        using var connection = _factory.Create();
+        await connection.ExecuteAsync(
+            "UPDATE TaskJira SET AssigneeName = @Name, AssigneeDisplay = @Display WHERE TaskId = @TaskId",
+            new { TaskId = taskId, Name = name, Display = display });
     }
 }

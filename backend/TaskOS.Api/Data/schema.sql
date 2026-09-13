@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS Task (
     EnergyType TEXT NOT NULL CHECK (EnergyType IN ('Deep','Light')) DEFAULT 'Light',
     Tags TEXT NULL,
     StuckReason TEXT NULL,
+    Pinned INTEGER NOT NULL DEFAULT 0,
     CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
     UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
     DoneAt TEXT NULL,
@@ -18,7 +19,9 @@ CREATE TABLE IF NOT EXISTS TaskJira (
     JiraKey TEXT NOT NULL UNIQUE,
     JiraUrl TEXT NULL,
     OpenCount INTEGER NOT NULL DEFAULT 0,
-    LastSeenAt TEXT NULL
+    LastSeenAt TEXT NULL,
+    AssigneeName TEXT NULL,
+    AssigneeDisplay TEXT NULL
 );
 
 CREATE TABLE IF NOT EXISTS TaskChecklistItem (
@@ -61,14 +64,58 @@ CREATE TABLE IF NOT EXISTS WorkLogEntry (
 CREATE TABLE IF NOT EXISTS Problem (
     Id INTEGER PRIMARY KEY AUTOINCREMENT,
     Title TEXT NOT NULL,
-    Status TEXT NOT NULL CHECK (Status IN ('Exploring','Chosen','Validated')) DEFAULT 'Exploring',
+    Status TEXT NOT NULL CHECK (Status IN ('Open','Monitoring','Resolved')) DEFAULT 'Open',
     NoTimeNote TEXT NULL,
     InfiniteTimeNote TEXT NULL,
     ChosenOptionId INTEGER NULL,
     PremortemSign TEXT NULL,
+    ExpectedBehavior TEXT NULL,
+    ActualBehavior TEXT NULL,
+    RootCause TEXT NULL,
+    DetectionGap TEXT NULL,
+    AffectedPopulation TEXT NULL,
+    Resolution TEXT NULL,
+    Recovery TEXT NULL,
+    ValidationNote TEXT NULL,
+    Prevention TEXT NULL,
+    ImpactBranches TEXT NULL,
+    ImpactCustomers TEXT NULL,
+    ImpactRecords TEXT NULL,
+    ImpactServices TEXT NULL,
+    ImpactSupport TEXT NULL,
+    ImpactBusiness TEXT NULL,
+    StartedAt TEXT NULL,
+    FirstAffectedAt TEXT NULL,
+    DetectedAt TEXT NULL,
+    RootCauseFoundAt TEXT NULL,
+    FixedAt TEXT NULL,
+    RecoveryCompletedAt TEXT NULL,
+    CostTechnical TEXT NULL,
+    CostOperational TEXT NULL,
+    CostBusiness TEXT NULL,
+    CostOpportunity TEXT NULL,
+    SectionSavedAt TEXT NULL,
     CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
     UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
     DeletedAt TEXT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ProblemAction (
+    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ProblemId INTEGER NOT NULL REFERENCES Problem(Id) ON DELETE CASCADE,
+    Title TEXT NOT NULL,
+    Owner TEXT NULL,
+    Deadline TEXT NULL,
+    Status TEXT NOT NULL CHECK (Status IN ('Open','Done')) DEFAULT 'Open',
+    CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+    UpdatedAt TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS TaskProblem (
+    TaskId INTEGER NOT NULL REFERENCES Task(Id) ON DELETE CASCADE,
+    ProblemId INTEGER NOT NULL REFERENCES Problem(Id) ON DELETE CASCADE,
+    CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (TaskId, ProblemId)
 );
 
 CREATE TABLE IF NOT EXISTS ProblemOption (
@@ -105,6 +152,9 @@ CREATE INDEX IF NOT EXISTS IX_WorkLogEntry_TaskId ON WorkLogEntry(TaskId);
 CREATE INDEX IF NOT EXISTS IX_WorkLogEntry_ProblemId ON WorkLogEntry(ProblemId);
 CREATE INDEX IF NOT EXISTS IX_Problem_Status ON Problem(Status);
 CREATE INDEX IF NOT EXISTS IX_ProblemOption_ProblemId ON ProblemOption(ProblemId);
+CREATE INDEX IF NOT EXISTS IX_ProblemAction_ProblemId ON ProblemAction(ProblemId);
+CREATE INDEX IF NOT EXISTS IX_TaskProblem_ProblemId ON TaskProblem(ProblemId);
+CREATE INDEX IF NOT EXISTS IX_TaskProblem_TaskId ON TaskProblem(TaskId);
 CREATE INDEX IF NOT EXISTS IX_TaskChecklistItem_TaskId ON TaskChecklistItem(TaskId);
 CREATE INDEX IF NOT EXISTS IX_TaskJira_JiraKey ON TaskJira(JiraKey);
 

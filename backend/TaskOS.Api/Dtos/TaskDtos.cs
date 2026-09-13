@@ -19,6 +19,10 @@ public sealed class TaskDto
     public string? JiraUrl { get; set; }
     public string? JiraDescription { get; set; }
     public string Ownership { get; set; } = "Mine";
+    public string? AssigneeName { get; set; }
+    public string? AssigneeDisplay { get; set; }
+    public bool Pinned { get; set; }
+    public IReadOnlyList<ProblemLinkDto> Problems { get; set; } = [];
 }
 
 public sealed class CreateTaskRequest
@@ -27,6 +31,7 @@ public sealed class CreateTaskRequest
     public string? EnergyType { get; set; }
     public string? Tags { get; set; }
     public IReadOnlyList<string>? TagList { get; set; }
+    public string? Ownership { get; set; }
 }
 
 public sealed class UpdateTaskRequest
@@ -43,6 +48,11 @@ public sealed class UpdateTaskStatusRequest
 {
     public string Status { get; set; } = string.Empty;
     public string? StuckReason { get; set; }
+}
+
+public sealed class SetTaskPinRequest
+{
+    public bool Pinned { get; set; }
 }
 
 public sealed class AddTimelineRequest

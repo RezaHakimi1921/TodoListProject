@@ -22,31 +22,85 @@ public sealed class FocusService : IFocusService
 
     public async Task<WorkFocusDto> GetAsync()
     {
-        using var connection = _factory.Create();
-        var row = await connection.QuerySingleOrDefaultAsync<FocusRow>(
-            "SELECT Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active FROM WorkFocus WHERE Id = 1");
-        var dto = Map(row);
-        dto.IsResting = await _settings.IsRestingAsync();
-        if (dto.IsResting && string.IsNullOrWhiteSpace(dto.Description))
+        int? resumeDoneId = null;
+        WorkFocusDto dto;
+        using (var connection = _factory.Create())
         {
-            dto.Description = "استراحت";
-            dto.Active = true;
-        }
-        else if (dto.Active && !dto.IsResting && dto.TaskId is int taskId)
-        {
-            var title = await connection.QuerySingleOrDefaultAsync<string>(
-                "SELECT Title FROM Task WHERE Id = @Id AND DeletedAt IS NULL", new { Id = taskId });
-            if (!string.IsNullOrWhiteSpace(title))
+            var row = await connection.QuerySingleOrDefaultAsync<FocusRow>(
+                "SELECT Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active FROM WorkFocus WHERE Id = 1");
+            dto = Map(row);
+            dto.IsResting = await _settings.IsRestingAsync();
+            dto.Note = await _settings.GetRestNoteAsync();
+            if (dto.Active
+                && DateTime.TryParse(dto.StartedAt, out var leftoverStart)
+                && TaskMapping.StartedOnPriorLocalDay(leftoverStart))
             {
-                dto.Description = title;
-                if (IsBrokenDescription(row?.Description))
+                var now = TaskMapping.Now();
+                await connection.ExecuteAsync(
+                    "UPDATE WorkFocus SET StartedAt = @Now, UpdatedAt = @Now WHERE Id = 1",
+                    new { Now = now });
+                dto.StartedAt = now;
+            }
+            if (dto.IsResting && dto.TaskId is int restTaskId)
+            {
+                await MarkActivityDoingAsync(restTaskId);
+            }
+            if (dto.IsResting && string.IsNullOrWhiteSpace(dto.Description))
+            {
+                dto.Description = "استراحت";
+                dto.Active = true;
+            }
+            else if (dto.Active && !dto.IsResting && dto.ProblemId is int focusedProblemId && dto.TaskId is null)
+            {
+                var problemTitle = await connection.QuerySingleOrDefaultAsync<string>(
+                    "SELECT Title FROM Problem WHERE Id = @Id AND DeletedAt IS NULL", new { Id = focusedProblemId });
+                if (!string.IsNullOrWhiteSpace(problemTitle))
                 {
+                    dto.Description = problemTitle;
+                }
+            }
+            else if (dto.Active && !dto.IsResting && dto.TaskId is int taskId)
+            {
+                var status = await connection.QuerySingleOrDefaultAsync<string>(
+                    "SELECT Status FROM Task WHERE Id = @Id AND DeletedAt IS NULL", new { Id = taskId });
+                if (string.Equals(status, "Done", StringComparison.OrdinalIgnoreCase))
+                {
+                    await LogElapsedWorkAsync(dto, WorkLogSources.Timer);
                     await connection.ExecuteAsync(
-                        "UPDATE WorkFocus SET Description = @Title WHERE Id = 1",
-                        new { Title = title });
+                        "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE Id = 1",
+                        new { Now = TaskMapping.Now() });
+                    dto.Active = false;
+                    dto.Description = string.Empty;
+                    dto.TaskId = null;
+                    resumeDoneId = taskId;
+                }
+                else
+                {
+                    var title = await connection.QuerySingleOrDefaultAsync<string>(
+                        "SELECT Title FROM Task WHERE Id = @Id AND DeletedAt IS NULL", new { Id = taskId });
+                    if (!string.IsNullOrWhiteSpace(title))
+                    {
+                        dto.Description = title;
+                        if (IsBrokenDescription(row?.Description))
+                        {
+                            await connection.ExecuteAsync(
+                                "UPDATE WorkFocus SET Description = @Title WHERE Id = 1",
+                                new { Title = title });
+                        }
+                    }
                 }
             }
         }
+
+        if (resumeDoneId is int doneId)
+        {
+            var resumed = await ResumePreviousFocusAsync(doneId);
+            if (resumed is not null)
+            {
+                return resumed;
+            }
+        }
+
         return dto;
     }
 
@@ -144,7 +198,7 @@ public sealed class FocusService : IFocusService
         return await GetAsync();
     }
 
-    public async Task<WorkFocusDto> StartRestAsync(string? description = null)
+    public async Task<WorkFocusDto> StartRestAsync(string? description = null, int? activityTaskId = null, string? note = null)
     {
         var focus = await GetAsync();
         if (!focus.IsResting)
@@ -163,42 +217,80 @@ public sealed class FocusService : IFocusService
             await _settings.UpdateAsync(new AppSettingsDto { PingMinutes = settings.PingMinutes, Paused = true });
         }
 
+        else if (focus.TaskId is int previousRest && previousRest != activityTaskId)
+        {
+            await ReopenActivityAsync(previousRest);
+        }
+
         var title = string.IsNullOrWhiteSpace(description) ? "استراحت" : description.Trim();
         var now = TaskMapping.Now();
         using var connection = _factory.Create();
         await connection.ExecuteAsync("""
             INSERT INTO WorkFocus (Id, Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active)
-            VALUES (1, @Description, NULL, NULL, @Now, @Now, 1)
+            VALUES (1, @Description, @TaskId, NULL, @Now, @Now, 1)
             ON CONFLICT(Id) DO UPDATE SET
                 Description = excluded.Description,
-                TaskId = NULL,
+                TaskId = excluded.TaskId,
                 ProblemId = NULL,
                 StartedAt = excluded.StartedAt,
                 UpdatedAt = excluded.UpdatedAt,
                 Active = 1
-            """, new { Description = title, Now = now });
+            """, new { Description = title, TaskId = activityTaskId, Now = now });
+        if (!string.IsNullOrWhiteSpace(note))
+        {
+            await _settings.SetRestNoteAsync(note);
+        }
+        else if (!focus.IsResting)
+        {
+            await _settings.SetRestNoteAsync(null);
+        }
+        if (activityTaskId is int startedId)
+        {
+            await MarkActivityDoingAsync(startedId);
+        }
+        await PauseOtherDoingAsync(activityTaskId);
         return await GetAsync();
     }
 
-    public async Task<WorkFocusDto> EndRestAsync()
+    public async Task<WorkFocusDto> SaveRestNoteAsync(string? note)
+    {
+        await _settings.SetRestNoteAsync(note);
+        return await GetAsync();
+    }
+
+    public async Task<WorkFocusDto> EndRestAsync(string? note = null)
     {
         var focus = await GetAsync();
         if (focus.IsResting && !string.IsNullOrWhiteSpace(focus.StartedAt)
             && DateTime.TryParse(focus.StartedAt, out var started))
         {
-            var minutes = ClampLogMinutes(ElapsedMinutes(started));
+            var minutes = SameDayLogMinutes(started);
             if (minutes is >= 1 and <= 480)
             {
+                var storedNote = string.IsNullOrWhiteSpace(note) ? focus.Note : note.Trim();
+                if (string.IsNullOrWhiteSpace(storedNote))
+                {
+                    storedNote = await _settings.GetRestNoteAsync();
+                }
+                var label = string.IsNullOrWhiteSpace(focus.Description) ? "استراحت" : focus.Description.Trim();
+                var description = string.IsNullOrWhiteSpace(storedNote)
+                    ? label
+                    : label + " — " + storedNote.Trim();
                 await _workLogs.CaptureAsync(new CaptureWorkLogRequest
                 {
-                    Description = string.IsNullOrWhiteSpace(focus.Description) ? "استراحت" : focus.Description,
+                    Description = description,
                     DurationMinutes = minutes,
-                    Source = WorkLogSources.Break
+                    Source = WorkLogSources.Break,
+                    TaskId = focus.TaskId
                 });
             }
         }
 
-        await _settings.SetRestingAsync(false);
+        if (focus.TaskId is int endedId)
+        {
+            await ReopenActivityAsync(endedId);
+        }
+        await _settings.SetRestNoteAsync(null);
         var resume = await _settings.ConsumeRestResumeAsync();
         if (!string.IsNullOrWhiteSpace(resume.Description))
         {
@@ -214,36 +306,151 @@ public sealed class FocusService : IFocusService
         return await ClearAsync();
     }
 
-    public async Task FlushElapsedSliceAsync()
+    public Task FlushElapsedSliceAsync()
+    {
+        // Time stays on StartedAt until the user leaves the task (Set/Finish/Clear/Rest).
+        return Task.CompletedTask;
+    }
+
+    public async Task FlushElapsedForTaskAsync(int taskId)
     {
         var focus = await GetAsync();
-        if (!focus.Active || focus.IsResting)
+        if (focus.IsResting)
         {
             return;
         }
 
-        if (focus.TaskId is null && focus.ProblemId is null)
+        if (!focus.Active || focus.TaskId != taskId)
         {
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(focus.StartedAt) || !DateTime.TryParse(focus.StartedAt, out var started))
+        await LogElapsedWorkAsync(focus, WorkLogSources.Timer);
+        await _settings.SetRestingAsync(false);
+        using (var connection = _factory.Create())
         {
-            return;
+            await connection.ExecuteAsync(
+                "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE Id = 1",
+                new { Now = TaskMapping.Now() });
         }
 
-        var elapsed = ElapsedMinutes(started);
-        var ping = Math.Max(1, (await _settings.GetAsync()).PingMinutes);
-        if (elapsed < ping)
+        await ResumePreviousFocusAsync(taskId);
+    }
+
+    private async Task<WorkFocusDto?> ResumePreviousFocusAsync(int doneTaskId)
+    {
+        var previous = await PickPreviousFocusTaskAsync(doneTaskId);
+        if (previous is null)
         {
-            return;
+            return null;
         }
 
-        await TickAsync(new FocusActionRequest
+        return await SetAsync(new SetFocusRequest
         {
-            DurationMinutes = elapsed,
-            Source = WorkLogSources.Timer
+            Description = previous.Title,
+            TaskId = previous.Id,
+            Log = false
         });
+    }
+
+    private async Task<TaskDto?> PickPreviousFocusTaskAsync(int doneTaskId)
+    {
+        var tasks = await _tasks.ListAsync(null, null, null);
+        var candidates = tasks.Where(task =>
+            task.Id != doneTaskId
+            && !string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(task.Ownership, TaskOwnerships.Other, StringComparison.OrdinalIgnoreCase)
+            && !IsResumeSkipTask(task.JiraKey)).ToList();
+
+        var paused = candidates
+            .Where(task =>
+                string.Equals(task.Status, TaskStatuses.Stuck, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(task.StuckReason, StuckReasons.Forgot, StringComparison.Ordinal))
+            .OrderByDescending(UpdatedAtValue)
+            .FirstOrDefault();
+        if (paused is not null)
+        {
+            return paused;
+        }
+
+        return candidates
+            .Where(task => string.Equals(task.Status, TaskStatuses.Doing, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(UpdatedAtValue)
+            .FirstOrDefault();
+    }
+
+    private static bool IsResumeSkipTask(string? jiraKey)
+    {
+        if (ActivityJira.IsActivity(jiraKey))
+        {
+            return true;
+        }
+
+        return string.Equals(
+            (jiraKey ?? string.Empty).Trim(),
+            ActivityJira.NotificationKey,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static DateTime UpdatedAtValue(TaskDto task) =>
+        DateTime.TryParse(task.UpdatedAt, out var value) ? value : DateTime.MinValue;
+
+    private async Task MarkActivityDoingAsync(int taskId)
+    {
+        var task = await _tasks.GetAsync(taskId);
+        if (task is null || !ActivityJira.IsActivity(task.JiraKey))
+        {
+            return;
+        }
+
+        if (!string.Equals(task.Status, TaskStatuses.Doing, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
+        {
+            await _tasks.UpdateStatusAsync(taskId, new UpdateTaskStatusRequest { Status = TaskStatuses.Doing });
+        }
+    }
+
+    private async Task ReopenActivityAsync(int taskId)
+    {
+        var task = await _tasks.GetAsync(taskId);
+        if (task is null || !ActivityJira.IsActivity(task.JiraKey))
+        {
+            return;
+        }
+
+        if (string.Equals(task.Status, TaskStatuses.Doing, StringComparison.OrdinalIgnoreCase))
+        {
+            await _tasks.UpdateStatusAsync(taskId, new UpdateTaskStatusRequest { Status = TaskStatuses.Open });
+        }
+    }
+
+    private async Task PauseOtherDoingAsync(int? keepTaskId)
+    {
+        var tasks = await _tasks.ListAsync(null, null, null);
+        foreach (var task in tasks)
+        {
+            if (keepTaskId is int keep && task.Id == keep)
+            {
+                continue;
+            }
+
+            if (!string.Equals(task.Status, TaskStatuses.Doing, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (ActivityJira.IsActivity(task.JiraKey))
+            {
+                await ReopenActivityAsync(task.Id);
+                continue;
+            }
+
+            await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest
+            {
+                Status = TaskStatuses.Stuck,
+                StuckReason = StuckReasons.Forgot
+            });
+        }
     }
 
     private async Task TryLogOutgoingFocusAsync(WorkFocusDto current, SetFocusRequest next)
@@ -280,6 +487,11 @@ public sealed class FocusService : IFocusService
         }
 
         var minutes = SliceMinutes(focus);
+        if (minutes < 1)
+        {
+            return;
+        }
+
         await _workLogs.CaptureAsync(new CaptureWorkLogRequest
         {
             Description = focus.Description,
@@ -292,16 +504,28 @@ public sealed class FocusService : IFocusService
 
     private static int SliceMinutes(WorkFocusDto focus)
     {
-        if (!string.IsNullOrWhiteSpace(focus.StartedAt) && DateTime.TryParse(focus.StartedAt, out var started))
+        if (string.IsNullOrWhiteSpace(focus.StartedAt) || !DateTime.TryParse(focus.StartedAt, out var started))
         {
-            var elapsed = ElapsedMinutes(started);
-            if (elapsed >= 1)
-            {
-                return ClampLogMinutes(elapsed);
-            }
+            return 0;
         }
 
-        return 1;
+        return SameDayLogMinutes(started);
+    }
+
+    private static int SameDayLogMinutes(DateTime started)
+    {
+        if (TaskMapping.StartedOnPriorLocalDay(started))
+        {
+            return 0;
+        }
+
+        var elapsed = ElapsedMinutes(started);
+        if (elapsed < 1)
+        {
+            return 0;
+        }
+
+        return ClampLogMinutes(elapsed);
     }
 
     private static bool IsBrokenDescription(string? value)
@@ -327,6 +551,17 @@ public sealed class FocusService : IFocusService
             if (task is not null && !string.IsNullOrWhiteSpace(task.Title))
             {
                 return task.Title.Trim();
+            }
+        }
+
+        if (request.ProblemId is int problemId)
+        {
+            using var connection = _factory.Create();
+            var problemTitle = await connection.QuerySingleOrDefaultAsync<string>(
+                "SELECT Title FROM Problem WHERE Id = @Id AND DeletedAt IS NULL", new { Id = problemId });
+            if (!string.IsNullOrWhiteSpace(problemTitle))
+            {
+                return problemTitle.Trim();
             }
         }
 

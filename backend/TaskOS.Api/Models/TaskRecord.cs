@@ -9,6 +9,7 @@ public sealed class TaskRecord
     public string? Tags { get; set; }
     public string? StuckReason { get; set; }
     public string Ownership { get; set; } = TaskOwnerships.Mine;
+    public int Pinned { get; set; }
     public string CreatedAt { get; set; } = string.Empty;
     public string UpdatedAt { get; set; } = string.Empty;
     public string? DoneAt { get; set; }

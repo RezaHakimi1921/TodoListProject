@@ -23,6 +23,7 @@ public sealed class JiraRestClient : IJiraRestClient
     private const string UnassignedJql =
         "project = PS AND assignee is EMPTY AND resolution is EMPTY";
     private const string RecentJql = "project = PS AND updated >= -1d";
+    private const string CreateProject = "SIP";
 
     private readonly HttpClient _http;
 
@@ -62,11 +63,215 @@ public sealed class JiraRestClient : IJiraRestClient
             return false;
         }
 
+        using (var current = await _http.GetAsync(
+            $"rest/api/2/issue/{Uri.EscapeDataString(key)}?fields=assignee",
+            cancellationToken))
+        {
+            if (!current.IsSuccessStatusCode)
+            {
+                return false;
+            }
+
+            using var doc = JsonDocument.Parse(await current.Content.ReadAsStringAsync(cancellationToken));
+            var fields = doc.RootElement.TryGetProperty("fields", out var fieldsEl) ? fieldsEl : default;
+            var assignee = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("assignee", out var assigneeEl)
+                ? assigneeEl
+                : default;
+            var parsed = ReadAssignee(assignee);
+            if (parsed.Present)
+            {
+                return IsSelf(parsed.Name, parsed.Display);
+            }
+        }
+
         using var response = await _http.PutAsJsonAsync(
             $"rest/api/2/issue/{Uri.EscapeDataString(key)}/assignee",
             new { name = "reza" },
             cancellationToken);
         return response.IsSuccessStatusCode;
+    }
+
+    public static bool IsSelf(string? name, string? displayName = null)
+    {
+        var user = (name ?? string.Empty).Trim().ToLowerInvariant();
+        var display = (displayName ?? string.Empty).Trim().ToLowerInvariant();
+        return user is "reza"
+            || display.Contains("reza hakimi", StringComparison.Ordinal)
+            || display.Contains("رضا حکیمی", StringComparison.Ordinal);
+    }
+
+    public async Task<JiraCreateMeta> GetSipCreateMetaAsync(CancellationToken cancellationToken = default)
+    {
+        var issueTypes = new List<JiraNamedOption>();
+        var components = new List<JiraNamedOption>();
+        var assignees = new List<JiraUserOption>();
+
+        using (var response = await _http.GetAsync(
+            $"rest/api/2/issue/createmeta?projectKeys={CreateProject}&expand=projects.issuetypes",
+            cancellationToken))
+        {
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                if (doc.RootElement.TryGetProperty("projects", out var projects) && projects.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var project in projects.EnumerateArray())
+                    {
+                        if (!project.TryGetProperty("issuetypes", out var types) || types.ValueKind != JsonValueKind.Array)
+                        {
+                            continue;
+                        }
+
+                        foreach (var type in types.EnumerateArray())
+                        {
+                            var id = type.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                            var name = type.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                            if (!string.IsNullOrWhiteSpace(id))
+                            {
+                                issueTypes.Add(new JiraNamedOption { Id = id, Name = name ?? id });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (issueTypes.Count == 0)
+        {
+            using var projectResponse = await _http.GetAsync($"rest/api/2/project/{CreateProject}", cancellationToken);
+            if (projectResponse.IsSuccessStatusCode)
+            {
+                using var projectDoc = JsonDocument.Parse(await projectResponse.Content.ReadAsStringAsync(cancellationToken));
+                if (projectDoc.RootElement.TryGetProperty("issueTypes", out var projectTypes) && projectTypes.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var type in projectTypes.EnumerateArray())
+                    {
+                        var id = type.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                        var name = type.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(id))
+                        {
+                            issueTypes.Add(new JiraNamedOption { Id = id, Name = name ?? id });
+                        }
+                    }
+                }
+            }
+        }
+
+        using (var response = await _http.GetAsync($"rest/api/2/project/{CreateProject}/components", cancellationToken))
+        {
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in doc.RootElement.EnumerateArray())
+                    {
+                        var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                        var name = item.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(id))
+                        {
+                            components.Add(new JiraNamedOption { Id = id, Name = name ?? id });
+                        }
+                    }
+                }
+            }
+        }
+
+        using (var response = await _http.GetAsync(
+            $"rest/api/2/user/assignable/search?project={CreateProject}&maxResults=50",
+            cancellationToken))
+        {
+            if (response.IsSuccessStatusCode)
+            {
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in doc.RootElement.EnumerateArray())
+                    {
+                        var name = item.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                        var display = item.TryGetProperty("displayName", out var displayEl) ? displayEl.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(name))
+                        {
+                            assignees.Add(new JiraUserOption { Name = name, DisplayName = display ?? name });
+                        }
+                    }
+                }
+            }
+        }
+
+        if (assignees.Count == 0 || assignees.All(row => !IsSelf(row.Name, row.DisplayName)))
+        {
+            assignees.Insert(0, new JiraUserOption { Name = "reza", DisplayName = "Reza Hakimi" });
+        }
+
+        return new JiraCreateMeta
+        {
+            ProjectKey = CreateProject,
+            IssueTypes = issueTypes,
+            Components = components,
+            Assignees = assignees
+        };
+    }
+
+    public async Task<JiraCreatedIssue> CreateSipIssueAsync(
+        string summary,
+        string? description,
+        string? issueTypeId,
+        string? issueTypeName,
+        string? componentId,
+        string? assigneeName,
+        CancellationToken cancellationToken = default)
+    {
+        var title = (summary ?? string.Empty).Trim();
+        if (title.Length == 0)
+        {
+            throw new ArgumentException("Title is required.");
+        }
+
+        var typeId = (issueTypeId ?? string.Empty).Trim();
+        if (typeId.Length == 0)
+        {
+            typeId = await ResolveSipIssueTypeIdAsync(issueTypeName, cancellationToken);
+        }
+
+        var fields = new Dictionary<string, object?>
+        {
+            ["project"] = new { key = CreateProject },
+            ["summary"] = title,
+            ["issuetype"] = new { id = typeId },
+            ["assignee"] = new { name = string.IsNullOrWhiteSpace(assigneeName) ? "reza" : assigneeName.Trim() }
+        };
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            fields["description"] = description.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(componentId))
+        {
+            fields["components"] = new[] { new { id = componentId.Trim() } };
+        }
+
+        using var response = await _http.PostAsJsonAsync("rest/api/2/issue", new { fields }, cancellationToken);
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new JiraRestException((int)response.StatusCode, raw);
+        }
+
+        using var doc = JsonDocument.Parse(raw);
+        var key = doc.RootElement.TryGetProperty("key", out var keyEl) ? keyEl.GetString() : null;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new JiraRestException((int)response.StatusCode, raw);
+        }
+
+        var baseUrl = (_http.BaseAddress?.ToString() ?? "https://jira.smartx.ir/").TrimEnd('/');
+        return new JiraCreatedIssue
+        {
+            Key = key.ToUpperInvariant(),
+            BrowseUrl = $"{baseUrl}/browse/{key}",
+            Summary = title
+        };
     }
 
     public async Task<string?> GetSummaryAsync(string jiraKey, CancellationToken cancellationToken = default)
@@ -99,6 +304,65 @@ public sealed class JiraRestClient : IJiraRestClient
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
         return doc.RootElement.TryGetProperty("id", out var id) ? id.GetString() : null;
+    }
+
+    public async Task<IReadOnlyList<JiraWorklogItem>> ListWorklogsAsync(string jiraKey, CancellationToken cancellationToken = default)
+    {
+        var key = RequireKey(jiraKey);
+        var rows = new List<JiraWorklogItem>();
+        var startAt = 0;
+        const int pageSize = 100;
+        while (true)
+        {
+            using var response = await _http.GetAsync(
+                $"rest/api/2/issue/{Uri.EscapeDataString(key)}/worklog?startAt={startAt}&maxResults={pageSize}",
+                cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                break;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            var root = doc.RootElement;
+            var total = root.TryGetProperty("total", out var totalEl) && totalEl.TryGetInt32(out var totalVal)
+                ? totalVal
+                : 0;
+            if (!root.TryGetProperty("worklogs", out var logs) || logs.ValueKind != JsonValueKind.Array)
+            {
+                break;
+            }
+
+            var pageCount = 0;
+            foreach (var item in logs.EnumerateArray())
+            {
+                pageCount++;
+                var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                var seconds = item.TryGetProperty("timeSpentSeconds", out var secEl) && secEl.TryGetInt32(out var sec)
+                    ? sec
+                    : 0;
+                rows.Add(new JiraWorklogItem
+                {
+                    Id = id,
+                    TimeSpentSeconds = seconds,
+                    Created = item.TryGetProperty("created", out var createdEl) ? createdEl.GetString() ?? string.Empty : string.Empty,
+                    Updated = item.TryGetProperty("updated", out var updatedEl) ? updatedEl.GetString() ?? string.Empty : string.Empty
+                });
+            }
+
+            if (pageCount == 0 || rows.Count >= total)
+            {
+                break;
+            }
+
+            startAt += pageCount;
+        }
+
+        return rows;
     }
 
     public async Task<IReadOnlyList<JiraIssueRef>> ListUnassignedProductSupportAsync(CancellationToken cancellationToken = default)
@@ -147,7 +411,7 @@ public sealed class JiraRestClient : IJiraRestClient
 
     public async Task<IReadOnlyList<JiraIssueComments>> ListRecentlyUpdatedProductSupportAsync(CancellationToken cancellationToken = default)
     {
-        var url = $"rest/api/2/search?jql={Uri.EscapeDataString(RecentJql)}&fields=summary,comment&maxResults=50";
+        var url = $"rest/api/2/search?jql={Uri.EscapeDataString(RecentJql)}&fields=summary,comment,status&maxResults=50";
         using var response = await _http.GetAsync(url, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -207,13 +471,265 @@ public sealed class JiraRestClient : IJiraRestClient
             {
                 Key = key.ToUpperInvariant(),
                 Summary = summary?.Trim() ?? key,
-                Comments = comments
+                Comments = comments,
+                Status = fields.ValueKind == JsonValueKind.Object
+                    && fields.TryGetProperty("status", out var statusEl)
+                    && statusEl.TryGetProperty("name", out var statusNameEl)
+                    ? statusNameEl.GetString() ?? ""
+                    : ""
             });
         }
 
         return rows;
     }
 
+    private async Task<string> ResolveSipIssueTypeIdAsync(string? preferredName, CancellationToken cancellationToken)
+    {
+        var url = $"rest/api/2/issue/createmeta?projectKeys={CreateProject}&expand=projects.issuetypes";
+        using var response = await _http.GetAsync(url, cancellationToken);
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new JiraRestException((int)response.StatusCode, raw);
+        }
+
+        using var doc = JsonDocument.Parse(raw);
+        if (!doc.RootElement.TryGetProperty("projects", out var projects) || projects.ValueKind != JsonValueKind.Array)
+        {
+            throw new JiraRestException((int)response.StatusCode, raw);
+        }
+
+        var types = new List<(string Id, string Name)>();
+        foreach (var project in projects.EnumerateArray())
+        {
+            if (!project.TryGetProperty("issuetypes", out var issueTypes) || issueTypes.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var type in issueTypes.EnumerateArray())
+            {
+                var id = type.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                var name = type.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    types.Add((id, name ?? ""));
+                }
+            }
+        }
+
+        if (types.Count == 0)
+        {
+            using var projectResponse = await _http.GetAsync($"rest/api/2/project/{CreateProject}", cancellationToken);
+            if (projectResponse.IsSuccessStatusCode)
+            {
+                using var projectDoc = JsonDocument.Parse(await projectResponse.Content.ReadAsStringAsync(cancellationToken));
+                if (projectDoc.RootElement.TryGetProperty("issueTypes", out var projectTypes) && projectTypes.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var type in projectTypes.EnumerateArray())
+                    {
+                        var id = type.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                        var name = type.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                        if (!string.IsNullOrWhiteSpace(id))
+                        {
+                            types.Add((id, name ?? ""));
+                        }
+                    }
+                }
+            }
+        }
+
+        if (types.Count == 0)
+        {
+            throw new InvalidOperationException("SIP issue types were not found.");
+        }
+
+        var preferred = (preferredName ?? string.Empty).Trim();
+        var match = types.FirstOrDefault(type =>
+            preferred.Length > 0 && type.Name.Equals(preferred, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(match.Id))
+        {
+            return match.Id;
+        }
+
+        foreach (var name in new[] { "Task", "Story", "Bug", "Service Request" })
+        {
+            match = types.FirstOrDefault(type => type.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(match.Id))
+            {
+                return match.Id;
+            }
+        }
+
+        return types[0].Id;
+    }
+
+    public async Task<IReadOnlyList<JiraIssueComments>> SearchIssueCommentsAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default)
+    {
+        var valid = keys
+            .Select(key => (key ?? string.Empty).Trim().ToUpperInvariant())
+            .Where(key => KeyPattern.IsMatch(key))
+            .Distinct()
+            .ToList();
+        var rows = new List<JiraIssueComments>();
+        foreach (var batch in valid.Chunk(40))
+        {
+            var jql = "key in (" + string.Join(",", batch) + ")";
+            var url = $"rest/api/2/search?jql={Uri.EscapeDataString(jql)}&fields=summary,comment,status&maxResults=50";
+            using var response = await _http.GetAsync(url, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                continue;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (!doc.RootElement.TryGetProperty("issues", out var issues) || issues.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var issue in issues.EnumerateArray())
+            {
+                var parsed = ParseIssueComments(issue);
+                if (parsed is not null)
+                {
+                    rows.Add(parsed);
+                }
+            }
+        }
+
+        return rows;
+    }
+    public async Task<IReadOnlyList<JiraIssueState>> SearchIssueStatesAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default)
+    {
+        var valid = keys
+            .Select(key => (key ?? string.Empty).Trim().ToUpperInvariant())
+            .Where(key => KeyPattern.IsMatch(key))
+            .Distinct()
+            .ToList();
+        var rows = new List<JiraIssueState>();
+        foreach (var batch in valid.Chunk(40))
+        {
+            var jql = "key in (" + string.Join(",", batch) + ")";
+            var url = $"rest/api/2/search?jql={Uri.EscapeDataString(jql)}&fields=status,assignee&maxResults=50";
+            using var response = await _http.GetAsync(url, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                continue;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (!doc.RootElement.TryGetProperty("issues", out var issues) || issues.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var issue in issues.EnumerateArray())
+            {
+                var key = issue.TryGetProperty("key", out var keyEl) ? keyEl.GetString() : null;
+                if (string.IsNullOrWhiteSpace(key))
+                {
+                    continue;
+                }
+
+                var fields = issue.TryGetProperty("fields", out var fieldsEl) ? fieldsEl : default;
+                var status = fields.ValueKind == JsonValueKind.Object
+                    && fields.TryGetProperty("status", out var statusEl)
+                    && statusEl.TryGetProperty("name", out var statusNameEl)
+                    ? statusNameEl.GetString() ?? ""
+                    : "";
+                var assignee = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("assignee", out var assigneeEl)
+                    ? assigneeEl
+                    : default;
+                var parsed = ReadAssignee(assignee);
+                rows.Add(new JiraIssueState
+                {
+                    Key = key.ToUpperInvariant(),
+                    Status = status,
+                    AssigneeName = parsed.Name,
+                    AssigneeDisplay = parsed.Display
+                });
+            }
+        }
+
+        return rows;
+    }
+
+    private static JiraIssueComments? ParseIssueComments(JsonElement issue)
+    {
+        var key = issue.TryGetProperty("key", out var keyEl) ? keyEl.GetString() : null;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return null;
+        }
+
+        var fields = issue.TryGetProperty("fields", out var fieldsEl) ? fieldsEl : default;
+        var summary = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("summary", out var summaryEl)
+            ? summaryEl.GetString()
+            : null;
+        var comments = new List<JiraCommentItem>();
+        if (fields.ValueKind == JsonValueKind.Object
+            && fields.TryGetProperty("comment", out var commentEl)
+            && commentEl.TryGetProperty("comments", out var list)
+            && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in list.EnumerateArray())
+            {
+                var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                var author = item.TryGetProperty("author", out var authorEl) ? authorEl : default;
+                comments.Add(new JiraCommentItem
+                {
+                    Id = id,
+                    Body = item.TryGetProperty("body", out var bodyEl) ? bodyEl.GetString() ?? "" : "",
+                    Created = item.TryGetProperty("created", out var createdEl) ? createdEl.GetString() ?? "" : "",
+                    AuthorName = author.ValueKind == JsonValueKind.Object && author.TryGetProperty("displayName", out var nameEl)
+                        ? nameEl.GetString() ?? ""
+                        : "",
+                    AuthorKey = author.ValueKind == JsonValueKind.Object && author.TryGetProperty("name", out var keyNameEl)
+                        ? keyNameEl.GetString() ?? ""
+                        : ""
+                });
+            }
+        }
+
+        return new JiraIssueComments
+        {
+            Key = key.ToUpperInvariant(),
+            Summary = summary?.Trim() ?? key,
+            Comments = comments,
+            Status = fields.ValueKind == JsonValueKind.Object
+                && fields.TryGetProperty("status", out var statusEl)
+                && statusEl.TryGetProperty("name", out var statusNameEl)
+                ? statusNameEl.GetString() ?? ""
+                : ""
+        };
+    }
+    private static (bool Present, string? Name, string? Display) ReadAssignee(JsonElement assignee)
+    {
+        if (assignee.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null)
+        {
+            return (false, null, null);
+        }
+
+        if (assignee.ValueKind != JsonValueKind.Object)
+        {
+            return (true, null, null);
+        }
+
+        var name = assignee.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+        if (string.IsNullOrWhiteSpace(name) && assignee.TryGetProperty("key", out var keyEl))
+        {
+            name = keyEl.GetString();
+        }
+
+        var display = assignee.TryGetProperty("displayName", out var displayEl) ? displayEl.GetString() : null;
+        return (true, name, display);
+    }
     private static string RequireKey(string? jiraKey)
     {
         var key = (jiraKey ?? string.Empty).Trim().ToUpperInvariant();
@@ -225,7 +741,7 @@ public sealed class JiraRestClient : IJiraRestClient
         return key;
     }
 
-    private static bool IsClosedStatus(string? name)
+    public static bool IsClosedStatus(string? name)
     {
         var value = (name ?? string.Empty).Trim().ToLowerInvariant();
         return value is "done" or "not solvable" or "canceled" or "cancelled"

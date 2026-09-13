@@ -403,7 +403,7 @@ function handleLocalMock<T>(path: string, init?: RequestInit): T {
     const newProb = {
       id: nextId,
       title: body.title,
-      status: 'Exploring' as const,
+      status: 'Open' as const,
       noTimeNote: null,
       infiniteTimeNote: null,
       chosenOptionId: null,
@@ -432,9 +432,8 @@ function handleLocalMock<T>(path: string, init?: RequestInit): T {
       if (idx !== -1) {
         store.problems[idx] = {
           ...store.problems[idx],
+          ...body,
           title: body.title ?? store.problems[idx].title,
-          noTimeNote: body.noTimeNote ?? store.problems[idx].noTimeNote,
-          infiniteTimeNote: body.infiniteTimeNote ?? store.problems[idx].infiniteTimeNote,
           updatedAt: new Date().toISOString(),
         }
         saveStore(store)
@@ -508,7 +507,7 @@ function handleLocalMock<T>(path: string, init?: RequestInit): T {
     if (p) {
       p.chosenOptionId = body.optionId
       p.premortemSign = body.premortemSign
-      p.status = 'Chosen'
+      p.status = 'Monitoring'
       p.options.forEach((o) => {
         o.isChosen = o.id === body.optionId
       })
@@ -522,7 +521,7 @@ function handleLocalMock<T>(path: string, init?: RequestInit): T {
     const pId = Number(problemValidateMatch[1])
     const p = store.problems.find((item) => item.id === pId)
     if (p) {
-      p.status = 'Validated'
+      p.status = 'Resolved'
       saveStore(store)
       return p as unknown as T
     }
@@ -687,5 +686,7 @@ export const api = {
     request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
+  patch: <T>(path: string, body: unknown) =>
+    request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: (path: string) => request<void>(path, { method: 'DELETE' }),
 }

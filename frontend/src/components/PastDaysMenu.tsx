@@ -2,30 +2,31 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { CalendarDays, ChevronDown } from 'lucide-react'
+import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { listTaskDays } from '../api/tasks'
-import { getRelativeDayLabel, todayIso } from '../lib/dates'
-
-function monthLabel(yearMonth: string) {
-  const date = new Date(`${yearMonth}-01T12:00:00`)
-  return new Intl.DateTimeFormat('fa-IR', { month: 'long', year: 'numeric' }).format(date)
-}
+import { JalaliMonthCalendar } from './JalaliMonthCalendar'
+import { addDaysIso, formatPersianDate, todayIso, yesterdayIso } from '../lib/dates'
 
 export function PastDaysMenu() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
-  const [box, setBox] = useState<{ top: number; right: number } | null>(null)
+  const [box, setBox] = useState<{ top: number; right: number; maxHeight: number } | null>(null)
   const today = todayIso()
+  const yesterday = yesterdayIso()
   const selected = params.get('date') || today
+  const viewing = selected === 'all' ? today : selected
 
   useEffect(() => {
     if (!open) return
     const updateBox = () => {
       const rect = rootRef.current?.getBoundingClientRect()
       if (!rect) return
-      setBox({ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) })
+      const panelWidth = Math.min(352, window.innerWidth - 16)
+      const right = Math.max(8, Math.min(window.innerWidth - rect.right, window.innerWidth - panelWidth - 8))
+      const top = Math.min(rect.bottom + 8, window.innerHeight - 96)
+      setBox({ top, right, maxHeight: Math.max(160, window.innerHeight - top - 8) })
     }
     updateBox()
     const onPointer = (event: MouseEvent) => {
@@ -51,67 +52,108 @@ export function PastDaysMenu() {
   const daysQuery = useQuery({
     queryKey: ['task-days'],
     queryFn: listTaskDays,
+    retry: 2,
+    enabled: open,
   })
 
-  const groups = useMemo(() => {
-    const rows = (daysQuery.data ?? []).filter((row) => row.date && row.date !== today)
-    const months = new Map<string, typeof rows>()
-    for (const row of rows) {
-      const key = row.date.slice(0, 7)
-      const list = months.get(key) ?? []
-      list.push(row)
-      months.set(key, list)
-    }
-    return [...months.entries()]
-  }, [daysQuery.data, today])
+  const marked = useMemo(
+    () => new Set((daysQuery.data ?? []).map((row) => row.date).filter(Boolean)),
+    [daysQuery.data],
+  )
 
-  const go = (search: string) => {
+  const go = (date: string) => {
     setOpen(false)
-    navigate({ pathname: '/', search })
+    if (date === today) navigate({ pathname: '/', search: '' })
+    else if (date === 'all') navigate({ pathname: '/', search: '?date=all' })
+    else navigate({ pathname: '/', search: `?date=${date}` })
   }
+
+  const shift = (days: number) => {
+    const next = addDaysIso(viewing, days)
+    if (next > today) {
+      go(today)
+      return
+    }
+    go(next)
+  }
+
+  const chip = (active: boolean) =>
+    `flex-1 rounded-xl border px-3 py-2 text-xs font-semibold transition-colors ${
+      active
+        ? 'border-amber-400/70 bg-amber-400 text-slate-950'
+        : 'border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]'
+    }`
 
   const panel = open && box && (
     <div
       id="past-days-menu-panel"
-      className="z-[80] w-80 max-h-[28rem] overflow-y-auto rounded-xl border border-amber-400/25 bg-[#12151e] p-2 shadow-2xl"
-      style={{ position: 'fixed', top: box.top, right: box.right }}
+      className="z-[80] w-[min(22rem,calc(100vw-1rem))] overflow-y-auto rounded-2xl border border-white/10 bg-[#10131b] p-4 shadow-2xl"
+      style={{ position: 'fixed', top: box.top, right: box.right, maxHeight: box.maxHeight }}
     >
-      {daysQuery.isPending && <p className="px-3 py-4 text-xs text-slate-500">در حال خواندن روزها...</p>}
-      {daysQuery.isError && (
-        <p className="px-3 py-4 text-xs text-rose-300">لیست روزها لود نشد. صفحه را رفرش کن.</p>
-      )}
-      <button
-        type="button"
-        onClick={() => go('?date=all')}
-        className="mb-2 flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]"
-      >
-        <span>همه روزها</span>
-      </button>
-      {groups.length === 0 && !daysQuery.isError && !daysQuery.isPending && (
-        <p className="px-3 py-4 text-xs text-slate-500">هنوز روز گذشته‌ای ثبت نشده.</p>
-      )}
-      {groups.map(([month, rows]) => (
-        <section key={month} className="mb-2">
-          <p className="px-2 py-1 text-[10px] tracking-wide text-amber-300/80">{monthLabel(month)}</p>
-          <div className="space-y-1">
-            {rows.map((row) => (
-              <button
-                key={row.date}
-                type="button"
-                onClick={() => go(`?date=${row.date}`)}
-                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-right text-xs ${
-                  selected === row.date ? 'bg-amber-400/20 text-amber-100' : 'bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]'
-                }`}
-              >
-                <span>{getRelativeDayLabel(row.date)}</span>
-                <span className="text-[10px] text-slate-400">
-                  {row.done}/{row.total} انجام
-                </span>
-              </button>
-            ))}
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2">
+          <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl border border-white/10 bg-white/[0.04]">
+            <CalendarDays className="h-4 w-4 text-slate-200" />
           </div>
-        </section>
-      ))}
+          <div>
+            <h3 className="text-sm font-bold text-white">مدیریت و ناوبری روزها</h3>
+            <p className="mt-0.5 text-[11px] text-slate-500">انتخاب روز با تقویم شمسی</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="rounded-lg p-1 text-slate-500 hover:bg-white/[0.06] hover:text-slate-200"
+          title="بستن"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <p className="mb-2 text-[11px] text-slate-500">جابجایی بین روزها</p>
+      <div className="mb-3 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => shift(1)}
+          disabled={viewing >= today}
+          className="rounded-xl border border-white/10 px-3 py-2 text-[11px] text-slate-300 hover:bg-white/[0.06] disabled:opacity-40"
+        >
+          <span className="inline-flex items-center gap-1">
+            <ChevronRight className="h-3.5 w-3.5" />
+            روز بعد
+          </span>
+        </button>
+        <div className="flex-1 rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-center text-xs font-semibold text-slate-100">
+          {formatPersianDate(viewing)}
+        </div>
+        <button
+          type="button"
+          onClick={() => shift(-1)}
+          className="rounded-xl border border-white/10 px-3 py-2 text-[11px] text-slate-300 hover:bg-white/[0.06]"
+        >
+          <span className="inline-flex items-center gap-1">
+            روز قبل
+            <ChevronLeft className="h-3.5 w-3.5" />
+          </span>
+        </button>
+      </div>
+
+      <div className="mb-3">
+        <p className="mb-1.5 text-[11px] text-slate-500">پرش مستقیم به تاریخ</p>
+        <JalaliMonthCalendar value={viewing} max={today} marked={marked} onChange={go} />
+      </div>
+
+      <div className="flex gap-2">
+        <button type="button" onClick={() => go(today)} className={chip(selected === today)}>
+          {selected === today ? <Check className="mb-0.5 inline h-3 w-3" /> : null} امروز
+        </button>
+        <button type="button" onClick={() => go(yesterday)} className={chip(selected === yesterday)}>
+          دیروز
+        </button>
+        <button type="button" onClick={() => go('all')} className={chip(selected === 'all')}>
+          همه روزها
+        </button>
+      </div>
     </div>
   )
 
@@ -120,15 +162,15 @@ export function PastDaysMenu() {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className={`flex items-center gap-2 px-3.5 py-2 text-xs font-medium rounded-lg transition-all whitespace-nowrap ${
-          selected !== today
-            ? 'bg-white/[0.08] text-white font-semibold border border-white/[0.1] shadow-sm'
-            : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.04]'
+        className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-medium whitespace-nowrap transition-all ${
+          open || selected !== today
+            ? 'border-white/15 bg-white/[0.08] text-white shadow-sm'
+            : 'border-transparent text-slate-400 hover:bg-white/[0.04] hover:text-slate-200'
         }`}
       >
-        <CalendarDays className="w-3.5 h-3.5 shrink-0 opacity-80" />
-        <span>روزهای گذشته</span>
-        <ChevronDown className="w-3 h-3 opacity-70" />
+        <CalendarDays className="h-3.5 w-3.5 shrink-0 opacity-80" />
+        <span>مدیریت روزها</span>
+        <ChevronDown className={`h-3 w-3 opacity-70 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {panel ? createPortal(panel, document.body) : null}
     </div>

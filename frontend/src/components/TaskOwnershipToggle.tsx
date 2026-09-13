@@ -5,9 +5,11 @@ interface Props {
   value: TaskOwnership
   onChange: (next: TaskOwnership) => void
   disabled?: boolean
+  otherLabel?: string
 }
 
-export function TaskOwnershipToggle({ value, onChange, disabled }: Props) {
+export function TaskOwnershipToggle({ value, onChange, disabled, otherLabel }: Props) {
+  const otherText = (otherLabel || '').trim() || 'دیگری' 
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-300 mb-1.5">این کار برای کیست؟</label>
@@ -36,7 +38,7 @@ export function TaskOwnershipToggle({ value, onChange, disabled }: Props) {
           }`}
         >
           <Users className="w-3 h-3" />
-          <span>دیگری</span>
+          <span className="truncate max-w-28" title={otherText}>{otherText}</span>
         </button>
       </div>
     </div>

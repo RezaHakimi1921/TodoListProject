@@ -9,6 +9,9 @@ public interface IWorkLogRepository
     Task<IReadOnlyList<WorkLogEntry>> ListByTaskAsync(int taskId);
     Task<IReadOnlyList<WorkLogEntry>> ListByProblemAsync(int problemId);
     Task<WorkLogEntry?> FindRecentAsync(int taskId, string source, TimeSpan window);
+    Task<WorkLogEntry?> GetByIdAsync(int id);
+    Task SetDescriptionAsync(int id, string description);
     Task SetJiraWorklogIdAsync(int id, string jiraWorklogId);
     Task AddMinutesAsync(int id, int extra);
+    Task SetDurationMinutesAsync(int id, int minutes);
 }

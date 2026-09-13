@@ -16,16 +16,23 @@ import {
   Check,
   ArrowLeft,
   X,
-  Sparkles
+  Sparkles,
+  Ticket,
+  User,
+  Users
 } from 'lucide-react'
+import { isJiraNewStatus, type JiraIssueState } from '../api/jira'
 import { listTaskDays, listTasks, updateTaskStatus, closeWorkday } from '../api/tasks'
+import { JIRA_ISSUE_STATE_KEY } from '../hooks/useJiraClosedTasks'
+import { taskJiraKey } from '../lib/jira'
 import { QuickAddTask } from '../components/QuickAddTask'
 import { TaskCard } from '../components/TaskCard'
 import { TaskEditorDrawer } from '../components/TaskEditorDrawer'
 import { AgingModal } from '../components/AgingModal'
-import { NowWorkingBanner } from '../components/NowWorkingBanner'
+import { JalaliMonthCalendar } from '../components/JalaliMonthCalendar'
+import { DayWorkSummary } from '../components/DayWorkSummary'
 import { todayIso, yesterdayIso, formatPersianDate, formatPersianDateShort, getRelativeDayLabel } from '../lib/dates'
-import { isFocusPaused, type TaskItem, type TaskStatus, type StuckReason } from '../types'
+import { isFocusPaused, type TaskItem, type TaskOwnership, type TaskStatus, type StuckReason } from '../types'
 
 export function DashboardPage() {
   const queryClient = useQueryClient()
@@ -46,6 +53,8 @@ export function DashboardPage() {
   }
 
   const [selectedStatus, setSelectedStatus] = useState<string>('all')
+  const [selectedKind, setSelectedKind] = useState<'all' | 'jira' | 'jira-new'>('all')
+  const [selectedOwnership, setSelectedOwnership] = useState<TaskOwnership | 'all'>('Mine')
   const [selectedEnergy, setSelectedEnergy] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'standard' | 'zen'>('standard')
@@ -53,12 +62,34 @@ export function DashboardPage() {
   const [agingTask, setAgingTask] = useState<TaskItem | null>(null)
   const [showRolloverModal, setShowRolloverModal] = useState(false)
   const [rolloverNote, setRolloverNote] = useState('')
+  const [dayPickerOpen, setDayPickerOpen] = useState(false)
 
   const isToday = selectedDate === today
   const isYesterday = selectedDate === yesterday
 
+  const jiraStateQuery = useQuery({
+    queryKey: JIRA_ISSUE_STATE_KEY,
+    queryFn: async () => [] as JiraIssueState[],
+    staleTime: 20_000,
+    enabled: false,
+    initialData: [],
+  })
+  const jiraStateByKey = useMemo(() => {
+    const map = new Map<string, JiraIssueState>()
+    for (const row of jiraStateQuery.data ?? []) {
+      if (row.key) map.set(row.key.toUpperCase(), row)
+    }
+    return map
+  }, [jiraStateQuery.data])
+
   const daysQuery = useQuery({ queryKey: ['task-days'], queryFn: listTaskDays })
-  const extraPastDays = (daysQuery.data ?? []).filter((row) => row.date && row.date !== today && row.date !== yesterday)
+  const markedDays = useMemo(
+    () => new Set((daysQuery.data ?? []).map((row) => row.date).filter(Boolean)),
+    [daysQuery.data],
+  )
+  const extraPastDays = (daysQuery.data ?? [])
+    .filter((row) => row.date && row.date !== today && row.date !== yesterday)
+    .slice(0, 2)
 
   const tasksQuery = useQuery({
     queryKey: ['tasks', selectedDate, searchQuery],
@@ -101,30 +132,55 @@ export function DashboardPage() {
     return allTasks.map((t) => {
       const createdDate = t.createdAt.slice(0, 10)
       const shouldBeRolledOver = t.status !== 'Done' && createdDate < today
+      const key = taskJiraKey(t)
+      const jira = key ? jiraStateByKey.get(key.toUpperCase()) : undefined
+      const overlayDisplay = (jira?.assignee?.displayName || jira?.assignee?.name || '').trim()
+      const overlayName = (jira?.assignee?.name || '').trim()
       return {
         ...t,
         rolledOver: t.rolledOver || shouldBeRolledOver,
+        assigneeDisplay: overlayDisplay || t.assigneeDisplay,
+        assigneeName: overlayName || t.assigneeName,
       }
     })
-  }, [allTasks, today])
+  }, [allTasks, today, jiraStateByKey])
+
+  const ownedTasks = useMemo(() => {
+    if (selectedOwnership === 'all') return tasks
+    return tasks.filter((task) => (task.ownership ?? 'Mine') === selectedOwnership)
+  }, [tasks, selectedOwnership])
+  const mineCount = tasks.filter((task) => (task.ownership ?? 'Mine') === 'Mine').length
+  const otherCount = tasks.filter((task) => task.ownership === 'Other').length
 
   // Stats calculation
-  const totalCount = tasks.length
-  const doneCount = tasks.filter((t) => t.status === 'Done').length
-  const doingCount = tasks.filter((t) => t.status === 'Doing').length
-  const pausedCount = tasks.filter((t) => isFocusPaused(t)).length
-  const stuckCount = tasks.filter((t) => t.status === 'Stuck' && !isFocusPaused(t)).length
-  const openCount = tasks.filter((t) => t.status === 'Open').length
-  const rolledOverCount = tasks.filter((t) => t.rolledOver && t.status !== 'Done').length
+  const totalCount = ownedTasks.length
+  const doneCount = ownedTasks.filter((t) => t.status === 'Done').length
+  const doingCount = ownedTasks.filter((t) => t.status === 'Doing').length
+  const pausedCount = ownedTasks.filter((t) => isFocusPaused(t)).length
+  const stuckCount = ownedTasks.filter((t) => t.status === 'Stuck' && !isFocusPaused(t)).length
+  const openCount = ownedTasks.filter((t) => t.status === 'Open').length
+  const rolledOverCount = ownedTasks.filter((t) => t.rolledOver && t.status !== 'Done').length
+  const isJiraTask = (task: TaskItem) => Boolean(taskJiraKey(task))
+  const isNewJiraTask = (task: TaskItem) => {
+    const key = taskJiraKey(task)
+    if (!key || task.status === 'Done') return false
+    const jira = jiraStateByKey.get(key.toUpperCase())
+    if (jira?.status) return isJiraNewStatus(jira.status)
+    return task.status === 'Open'
+  }
+  const jiraCount = ownedTasks.filter(isJiraTask).length
+  const jiraNewCount = ownedTasks.filter(isNewJiraTask).length
   const completionPercentage = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0
 
   // Filtered tasks
   const filteredTasks = useMemo(() => {
-    return tasks.filter((task) => {
+    return ownedTasks.filter((task) => {
       if (selectedStatus === 'Paused') return isFocusPaused(task)
       if (selectedStatus === 'Stuck' && isFocusPaused(task)) return false
       if (selectedStatus !== 'all' && selectedStatus !== 'Paused' && task.status !== selectedStatus) return false
       if (selectedEnergy !== 'all' && task.energyType !== selectedEnergy) return false
+      if (selectedKind === 'jira' && !isJiraTask(task)) return false
+      if (selectedKind === 'jira-new' && !isNewJiraTask(task)) return false
       if (searchQuery.trim()) {
         const query = searchQuery.trim().toLowerCase()
         const key = (task.jiraKey ?? '').toLowerCase()
@@ -138,30 +194,30 @@ export function DashboardPage() {
       }
       return true
     })
-  }, [tasks, selectedStatus, selectedEnergy, searchQuery])
+  }, [ownedTasks, selectedStatus, selectedKind, selectedEnergy, searchQuery, jiraStateByKey])
 
-  const deepTasks = filteredTasks.filter((t) => t.energyType === 'Deep')
-  const lightTasks = filteredTasks.filter((t) => t.energyType === 'Light')
+  const byPin = (a: TaskItem, b: TaskItem) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned))
+  const deepTasks = filteredTasks.filter((t) => t.energyType === 'Deep').slice().sort(byPin)
+  const lightTasks = filteredTasks.filter((t) => t.energyType === 'Light').slice().sort(byPin)
+  const orderedTasks = filteredTasks.slice().sort(byPin)
 
   return (
     <div className="space-y-7 max-w-6xl mx-auto">
-      <NowWorkingBanner />
-
       {/* 1. Day Partitioning & Motivation Header (Clean Linear Aesthetic) */}
       <section 
         id="dashboard-hero-section"
         aria-label="بخش وضعیت روز کاری"
-        className="rounded-2xl border border-white/[0.08] bg-[#0e1118] p-6 sm:p-7 shadow-xl shadow-black/25"
+        className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0e1118] p-5 sm:p-7 shadow-xl shadow-black/25"
       >
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-2">
+        <div className="flex min-w-0 flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1 space-y-3">
             {/* Day Selector Pills */}
-            <div className="flex items-center gap-1.5 p-1 rounded-lg bg-black/30 border border-white/[0.06] w-fit">
+            <div className="flex min-w-0 w-full flex-wrap items-center gap-1.5 rounded-lg border border-white/[0.06] bg-black/30 p-1">
               <button
                 id="btn-day-today"
                 type="button"
                 onClick={() => setSelectedDate(today)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-md text-xs font-medium transition-all ${
                   isToday
                     ? 'bg-white/15 text-white font-semibold shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -173,7 +229,7 @@ export function DashboardPage() {
                 id="btn-day-yesterday"
                 type="button"
                 onClick={() => setSelectedDate(yesterday)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-md text-xs font-medium transition-all ${
                   isYesterday
                     ? 'bg-white/15 text-white font-semibold shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -186,7 +242,7 @@ export function DashboardPage() {
                   key={row.date}
                   type="button"
                   onClick={() => setSelectedDate(row.date)}
-                  className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-md text-xs font-medium transition-all ${
                     selectedDate === row.date
                       ? 'bg-white/15 text-white font-semibold shadow-sm'
                       : 'text-slate-400 hover:text-slate-200'
@@ -195,11 +251,20 @@ export function DashboardPage() {
                   {getRelativeDayLabel(row.date)} ({row.done}/{row.total})
                 </button>
               ))}
+              {!isToday && !isYesterday && selectedDate !== 'all' && !extraPastDays.some((row) => row.date === selectedDate) && (
+                <button
+                  id="btn-day-selected"
+                  type="button"
+                  className="shrink-0 whitespace-nowrap px-3 py-1 rounded-md text-xs font-medium bg-white/15 text-white font-semibold shadow-sm"
+                >
+                  {formatPersianDateShort(selectedDate)}
+                </button>
+              )}
               <button
                 id="btn-day-all"
                 type="button"
                 onClick={() => setSelectedDate('all')}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                className={`shrink-0 whitespace-nowrap px-3 py-1 rounded-md text-xs font-medium transition-all ${
                   selectedDate === 'all'
                     ? 'bg-white/15 text-white font-semibold shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -207,16 +272,34 @@ export function DashboardPage() {
               >
                 همه روزها
               </button>
-              {!isToday && !isYesterday && selectedDate !== 'all' && (
-                <button
-                  id="btn-day-selected"
-                  type="button"
-                  className="px-3 py-1 rounded-md text-xs font-medium bg-white/15 text-white font-semibold shadow-sm"
-                >
-                  {formatPersianDateShort(selectedDate)}
-                </button>
-              )}
+              <button
+                id="btn-day-calendar"
+                type="button"
+                onClick={() => setDayPickerOpen((open) => !open)}
+                className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                  dayPickerOpen
+                    ? 'bg-white/15 text-white font-semibold shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+                title="انتخاب تاریخ از تقویم"
+              >
+                <Calendar className="h-3 w-3" />
+                تقویم
+              </button>
             </div>
+            {dayPickerOpen ? (
+              <div className="max-w-sm">
+                <JalaliMonthCalendar
+                  value={selectedDate === 'all' ? today : selectedDate}
+                  max={today}
+                  marked={markedDays}
+                  onChange={(iso) => {
+                    setSelectedDate(iso)
+                    setDayPickerOpen(false)
+                  }}
+                />
+              </div>
+            ) : null}
 
             {/* Headline */}
             <div>
@@ -236,9 +319,9 @@ export function DashboardPage() {
           </div>
 
           {/* Progress & Day Closure Actions */}
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex w-full min-w-0 shrink-0 flex-wrap items-center gap-3 xl:w-auto xl:max-w-md">
             {/* Progress Container */}
-            <div className="rounded-xl border border-white/[0.08] bg-black/25 px-4 py-3 min-w-[200px]">
+            <div className="w-full min-w-0 rounded-xl border border-white/[0.08] bg-black/25 px-4 py-3 sm:min-w-[200px] sm:flex-1 xl:w-[220px] xl:flex-none">
               <div className="flex items-center justify-between text-xs mb-2">
                 <span className="text-slate-400 font-medium">پیشرفت روز</span>
                 <span className="font-mono font-semibold text-slate-200">{completionPercentage}%</span>
@@ -265,7 +348,7 @@ export function DashboardPage() {
                 id="btn-end-workday"
                 type="button"
                 onClick={() => setShowRolloverModal(true)}
-                className="flex items-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] px-4 py-3 text-xs font-medium text-slate-200 hover:text-white transition-all shadow-sm"
+                className="flex w-full sm:w-auto items-center gap-2 rounded-xl border border-white/[0.1] bg-white/[0.04] hover:bg-white/[0.08] px-4 py-3 text-xs font-medium text-slate-200 hover:text-white transition-all shadow-sm"
                 title="پایان روز کاری و انتقال خودکار کارهای باقی‌مانده به روز جدید"
               >
                 <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
@@ -278,6 +361,8 @@ export function DashboardPage() {
           </div>
         </div>
       </section>
+
+      {!isToday && selectedDate !== 'all' ? <DayWorkSummary date={selectedDate} /> : null}
 
       {/* 2. Quick Add Task Input */}
       {isToday && <QuickAddTask />}
@@ -309,6 +394,58 @@ export function DashboardPage() {
                   : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.03]'
               }`}
             >
+              <span>{item.label}</span>
+              <span className="mr-1 text-[10px] font-mono opacity-60">({item.count})</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] text-slate-500 ml-1">مالک:</span>
+          {[
+            { key: 'Mine' as const, label: 'من', count: mineCount, Icon: User },
+            { key: 'Other' as const, label: 'دیگری', count: otherCount, Icon: Users },
+            { key: 'all' as const, label: 'همه', count: tasks.length, Icon: null },
+          ].map((item) => (
+            <button
+              key={item.key}
+              id={`filter-ownership-${item.key}`}
+              type="button"
+              onClick={() => setSelectedOwnership(item.key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                selectedOwnership === item.key
+                  ? item.key === 'Other'
+                    ? 'bg-violet-400/15 text-violet-200 font-semibold border border-violet-400/30'
+                    : 'bg-sky-400/15 text-sky-200 font-semibold border border-sky-400/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.03]'
+              }`}
+            >
+              {item.Icon ? <item.Icon className="w-3 h-3 inline-block ml-1 opacity-80" /> : null}
+              <span>{item.label}</span>
+              <span className="mr-1 text-[10px] font-mono opacity-60">({item.count})</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="text-[10px] text-slate-500 ml-1">جیرا:</span>
+          {[
+            { key: 'all' as const, label: 'همه', count: totalCount },
+            { key: 'jira' as const, label: 'تسک‌های جیرا', count: jiraCount },
+            { key: 'jira-new' as const, label: 'تسک‌های جدید جیرا', count: jiraNewCount },
+          ].map((item) => (
+            <button
+              key={item.key}
+              id={`filter-kind-${item.key}`}
+              type="button"
+              onClick={() => setSelectedKind(item.key)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                selectedKind === item.key
+                  ? 'bg-sky-400/15 text-sky-200 font-semibold border border-sky-400/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-white/[0.03]'
+              }`}
+            >
+              {item.key !== 'all' ? <Ticket className="w-3 h-3 inline-block ml-1 opacity-80" /> : null}
               <span>{item.label}</span>
               <span className="mr-1 text-[10px] font-mono opacity-60">({item.count})</span>
             </button>
@@ -373,7 +510,7 @@ export function DashboardPage() {
                   {deepTasks.length}
                 </span>
               </div>
-              <span className="text-[11px] text-slate-500">کارهای اصلی نیازمند غرقگی</span>
+              <span className="hidden sm:inline text-[11px] text-slate-500">کارهای اصلی نیازمند غرقگی</span>
             </div>
 
             <div className="space-y-2.5">
@@ -407,7 +544,7 @@ export function DashboardPage() {
                   {lightTasks.length}
                 </span>
               </div>
-              <span className="text-[11px] text-slate-500">پیام‌ها، بازبینی و کارهای روتین</span>
+              <span className="hidden sm:inline text-[11px] text-slate-500">پیام‌ها، بازبینی و کارهای روتین</span>
             </div>
 
             <div className="space-y-2.5">
@@ -440,7 +577,7 @@ export function DashboardPage() {
               </span>
             </div>
             <span className="text-[11px] text-slate-500 font-mono">
-              مجموع {filteredTasks.length} کار
+              مجموع {orderedTasks.length} کار
             </span>
           </div>
 
@@ -450,7 +587,7 @@ export function DashboardPage() {
                 <p className="text-xs text-slate-400">هیچ کاری یافت نشد.</p>
               </div>
             ) : (
-              filteredTasks.map((task) => (
+              orderedTasks.map((task) => (
                 <TaskCard
                   key={task.id}
                   task={task}

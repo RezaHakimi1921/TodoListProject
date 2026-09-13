@@ -11,7 +11,7 @@ function extractKey(url) {
       || parsed.searchParams.get('createdIssueKey')
       || hashParams.get('issueKey')
     if (selected && /^[A-Z][A-Z0-9]+-\d+$/i.test(selected)) return selected.toUpperCase()
-    const path = parsed.pathname.match(/\/(?:browse|issues)\/([A-Z][A-Z0-9]+-\d+)/i)
+    const path = parsed.pathname.match(/\/(?:browse|issues|projects\/[^/]+\/queues\/issue)\/([A-Z][A-Z0-9]+-\d+)/i)
     if (path) return path[1].toUpperCase()
     const desk = parsed.pathname.match(/\/servicedesk\/customer\/portal\/\d+\/([A-Z][A-Z0-9]+-\d+)/i)
     if (desk) return desk[1].toUpperCase()
@@ -62,6 +62,31 @@ function readPageTitle(key) {
   return cleanTitle(document.title, key) || key
 }
 
+function readPageStatus() {
+  const selectors = ['#status-val', '#status-val span', '.jira-issue-status', '[data-testid*="status.status-field"]', '#opsbar-transitions-trigger']
+  for (const selector of selectors) {
+    const node = document.querySelector(selector)
+    const text = (node?.textContent || '').replace(/\s+/g, ' ').trim()
+    if (text) return text
+  }
+  return ''
+}
+
+function isClosedStatus(name) {
+  const value = String(name || '').trim().toLowerCase()
+  return [
+    'done',
+    'not solvable',
+    'canceled',
+    'cancelled',
+    'request completed',
+    'request cancelled',
+    'request canceled',
+    'انجام شده',
+    'لغو شده',
+  ].includes(value)
+}
+
 function report(force) {
   const url = location.href
   const key = extractKey(url)
@@ -70,11 +95,12 @@ function report(force) {
     return
   }
   const title = readPageTitle(key)
-  const stamp = `${key}|${url}|${title}`
+  const status = readPageStatus()
+  const stamp = `${key}|${url}|${title}|${status}`
   if (!force && stamp === lastSent) return
   lastSent = stamp
   try {
-    chrome.runtime.sendMessage({ type: 'jira-url', url, title, key })
+    chrome.runtime.sendMessage({ type: 'jira-url', url, title, key, status })
   } catch {
     /* extension reloading */
   }

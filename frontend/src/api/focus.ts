@@ -19,6 +19,7 @@ export interface WorkFocus {
   startedAt: string | null
   updatedAt: string | null
   isResting: boolean
+  note: string
   pendingSwitch: JiraSwitchPending | null
 }
 
@@ -56,6 +57,7 @@ function camel(row: Record<string, unknown>): WorkFocus {
     startedAt: (row.startedAt as string | null) ?? null,
     updatedAt: (row.updatedAt as string | null) ?? null,
     isResting: Boolean(row.isResting),
+    note: String(row.note ?? '').trim(),
     pendingSwitch: pending(row.pendingSwitch as Record<string, unknown> | null),
   }
 }
@@ -94,10 +96,22 @@ export function clearFocus() {
   return api.delete('/api/focus').then(() => getFocus())
 }
 
-export function startRest(description?: string) {
-  return api.post<Record<string, unknown>>('/api/focus/rest', { description }).then(camel)
+export function startRest(description?: string, note?: string) {
+  return api.post<Record<string, unknown>>('/api/focus/rest', { description, note }).then(camel)
 }
 
-export function endRest() {
-  return api.post<Record<string, unknown>>('/api/focus/rest/end', {}).then(camel)
+export function saveRestNote(note?: string) {
+  return api.post<Record<string, unknown>>('/api/focus/rest/note', { note }).then(camel)
+}
+
+export function endRest(note?: string) {
+  return api.post<Record<string, unknown>>('/api/focus/rest/end', { note }).then(camel)
+}
+
+export function transferPendingFocus() {
+  return api.post<Record<string, unknown>>('/api/focus/transfer', {}).then(camel)
+}
+
+export function holdPendingFocus() {
+  return api.post<Record<string, unknown>>('/api/focus/hold', {}).then(camel)
 }

@@ -20,8 +20,11 @@ public sealed class NotificationsController : ControllerBase
         Ok(await _inbox.ListAsync(unread));
 
     [HttpGet("unread-count")]
-    public async Task<ActionResult<object>> UnreadCount() =>
-        Ok(new { count = await _inbox.CountUnreadAsync() });
+    public async Task<ActionResult<object>> UnreadCount()
+    {
+        var (newTasks, comments) = await _inbox.CountUnreadByKindAsync();
+        return Ok(new { count = newTasks + comments, newTasks, comments });
+    }
 
     [HttpPost("{id:int}/read")]
     public async Task<IActionResult> MarkRead(int id)
@@ -34,6 +37,12 @@ public sealed class NotificationsController : ControllerBase
     public async Task<IActionResult> MarkReadByTask(int taskId)
     {
         await _inbox.MarkReadByTaskAsync(taskId);
+        return Ok(new { ok = true });
+    }
+    [HttpPost("read-key/{jiraKey}")]
+    public async Task<IActionResult> MarkReadByKey(string jiraKey)
+    {
+        await _inbox.MarkReadByJiraKeyAsync(jiraKey);
         return Ok(new { ok = true });
     }
 }

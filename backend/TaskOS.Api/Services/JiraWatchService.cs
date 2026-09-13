@@ -40,17 +40,6 @@ public sealed class JiraWatchService : IJiraWatchService
         {
             if (_watch is { } current && string.Equals(current.Key, key, StringComparison.OrdinalIgnoreCase))
             {
-                if (current.Transferred)
-                {
-                    current.LastSeenUtc = now;
-                    return TryTransferAsync(cancellationToken);
-                }
-
-                if (incomingSince < current.SinceUtc)
-                {
-                    current.SinceUtc = incomingSince;
-                }
-
                 if (!string.IsNullOrWhiteSpace(title) && !string.Equals(title, key, StringComparison.OrdinalIgnoreCase))
                 {
                     current.Title = title;
@@ -62,6 +51,20 @@ public sealed class JiraWatchService : IJiraWatchService
                 }
 
                 current.LastSeenUtc = now;
+                if (current.Dismissed)
+                {
+                    return Task.CompletedTask;
+                }
+
+                if (current.Transferred)
+                {
+                    return TryTransferAsync(cancellationToken);
+                }
+
+                if (incomingSince < current.SinceUtc)
+                {
+                    current.SinceUtc = incomingSince;
+                }
             }
             else
             {
@@ -99,13 +102,26 @@ public sealed class JiraWatchService : IJiraWatchService
         }
     }
 
+    public void DismissPending()
+    {
+        lock (_gate)
+        {
+            if (_watch is null)
+            {
+                return;
+            }
+
+            _watch.Dismissed = true;
+        }
+    }
+
     public async Task<JiraSwitchPendingDto?> GetPendingAsync(CancellationToken cancellationToken = default)
     {
         await TryTransferAsync(cancellationToken);
         WatchState? snapshot;
         lock (_gate)
         {
-            snapshot = _watch is null || _watch.Transferred ? null : _watch.Clone();
+            snapshot = _watch is null || _watch.Transferred || _watch.Dismissed ? null : _watch.Clone();
         }
 
         if (snapshot is null)
@@ -137,15 +153,21 @@ public sealed class JiraWatchService : IJiraWatchService
         };
     }
 
-    public async Task TryTransferAsync(CancellationToken cancellationToken = default)
+    public Task TryTransferAsync(CancellationToken cancellationToken = default) =>
+        TransferSnapshotAsync(requireElapsed: true, ignoreRest: false, cancellationToken);
+
+    public Task TransferNowAsync(CancellationToken cancellationToken = default) =>
+        TransferSnapshotAsync(requireElapsed: false, ignoreRest: true, cancellationToken);
+
+    private async Task TransferSnapshotAsync(bool requireElapsed, bool ignoreRest, CancellationToken cancellationToken)
     {
         WatchState? snapshot;
         lock (_gate)
         {
-            snapshot = _watch is null || _watch.Transferred ? null : _watch.Clone();
+            snapshot = _watch is null || _watch.Transferred || _watch.Dismissed ? null : _watch.Clone();
         }
 
-        if (snapshot is null || RemainingSeconds(snapshot.SinceUtc) > 0)
+        if (snapshot is null || (requireElapsed && RemainingSeconds(snapshot.SinceUtc) > 0))
         {
             return;
         }
@@ -153,18 +175,30 @@ public sealed class JiraWatchService : IJiraWatchService
         try
         {
             using var scope = _scopes.CreateScope();
-            var settings = await scope.ServiceProvider.GetRequiredService<ISettingsService>().GetAsync();
-            if (await scope.ServiceProvider.GetRequiredService<ISettingsService>().IsRestingAsync())
+            var settings = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+            var focus = scope.ServiceProvider.GetRequiredService<IFocusService>();
+            if (await settings.IsRestingAsync())
             {
+                if (!ignoreRest)
+                {
+                    return;
+                }
+
+                await focus.EndRestAsync();
+            }
+
+            var current = await focus.GetAsync();
+            var links = scope.ServiceProvider.GetRequiredService<Repositories.ITaskJiraRepository>();
+            var match = await links.GetByKeyAsync(snapshot.Key);
+            if (current.Active && match is not null && current.TaskId == match.TaskId)
+            {
+                MarkTransferred(snapshot.Key);
                 return;
             }
 
-            var focus = await scope.ServiceProvider.GetRequiredService<IFocusService>().GetAsync();
-            var links = scope.ServiceProvider.GetRequiredService<Repositories.ITaskJiraRepository>();
-            var match = await links.GetByKeyAsync(snapshot.Key);
-            if (focus.Active && match is not null && focus.TaskId == match.TaskId)
+            var pingMinutes = (await settings.GetAsync()).PingMinutes;
+            if (IsDismissed(snapshot.Key))
             {
-                MarkTransferred(snapshot.Key);
                 return;
             }
 
@@ -175,7 +209,7 @@ public sealed class JiraWatchService : IJiraWatchService
                 JiraUrl = snapshot.Url,
                 Title = snapshot.Title,
                 FinishPrevious = true,
-                DurationMinutes = settings.PingMinutes
+                DurationMinutes = pingMinutes
             });
             MarkTransferred(snapshot.Key);
             _logger.LogInformation("Jira dwell transferred focus to {Key}", snapshot.Key);
@@ -186,11 +220,23 @@ public sealed class JiraWatchService : IJiraWatchService
         }
     }
 
+    private bool IsDismissed(string key)
+    {
+        lock (_gate)
+        {
+            return _watch is not null
+                && string.Equals(_watch.Key, key, StringComparison.OrdinalIgnoreCase)
+                && _watch.Dismissed;
+        }
+    }
+
     private void MarkTransferred(string key)
     {
         lock (_gate)
         {
-            if (_watch is not null && string.Equals(_watch.Key, key, StringComparison.OrdinalIgnoreCase))
+            if (_watch is not null
+                && string.Equals(_watch.Key, key, StringComparison.OrdinalIgnoreCase)
+                && !_watch.Dismissed)
             {
                 _watch.Transferred = true;
             }
@@ -228,6 +274,7 @@ public sealed class JiraWatchService : IJiraWatchService
         public DateTime SinceUtc { get; set; }
         public DateTime LastSeenUtc { get; set; }
         public bool Transferred { get; set; }
+        public bool Dismissed { get; set; }
 
         public WatchState Clone() => new()
         {
@@ -236,7 +283,8 @@ public sealed class JiraWatchService : IJiraWatchService
             Url = Url,
             SinceUtc = SinceUtc,
             LastSeenUtc = LastSeenUtc,
-            Transferred = Transferred
+            Transferred = Transferred,
+            Dismissed = Dismissed
         };
     }
 }

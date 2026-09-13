@@ -65,6 +65,18 @@ public sealed class WorkLogsController : ControllerBase
     public async Task<ActionResult<EntityWorkLogDto>> ByProblem(int problemId) =>
         Ok(await _workLogs.ListByProblemAsync(problemId));
 
+    [HttpPatch("{id:int}")]
+    public async Task<ActionResult<WorkLogDto>> Update(int id, [FromBody] UpdateWorkLogRequest? request)
+    {
+        try
+        {
+            return Ok(await _workLogs.UpdateDescriptionAsync(id, request?.Description ?? string.Empty));
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+    }
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {

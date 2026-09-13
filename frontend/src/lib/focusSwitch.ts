@@ -14,3 +14,12 @@ export async function requestTaskFocus(task: TaskItem) {
     log: false,
   })
 }
+
+export async function requestProblemFocus(problem: { id: number; title: string }) {
+  return setFocus({
+    description: problem.title.trim() || `مسئله #${problem.id}`,
+    problemId: problem.id,
+    durationMinutes: 0,
+    log: false,
+  })
+}

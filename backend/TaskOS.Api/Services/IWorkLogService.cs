@@ -9,4 +9,5 @@ public interface IWorkLogService
     Task<WorkLogSummaryDto> GetSummaryAsync(string logDate);
     Task<EntityWorkLogDto> ListByTaskAsync(int taskId);
     Task<EntityWorkLogDto> ListByProblemAsync(int problemId);
+    Task<WorkLogDto> UpdateDescriptionAsync(int id, string description);
 }

@@ -14,13 +14,20 @@ public sealed class JiraLinkService : IJiraLinkService
     private readonly ITaskService _tasks;
     private readonly IFocusService _focus;
     private readonly IJiraRestClient _jiraRest;
+    private readonly IJiraCommentInboxService _inbox;
 
-    public JiraLinkService(ITaskJiraRepository links, ITaskService tasks, IFocusService focus, IJiraRestClient jiraRest)
+    public JiraLinkService(
+        ITaskJiraRepository links,
+        ITaskService tasks,
+        IFocusService focus,
+        IJiraRestClient jiraRest,
+        IJiraCommentInboxService inbox)
     {
         _links = links;
         _tasks = tasks;
         _focus = focus;
         _jiraRest = jiraRest;
+        _inbox = inbox;
     }
 
     public async Task<JiraSeenDto> SeenAsync(JiraSeenRequest request)
@@ -57,7 +64,7 @@ public sealed class JiraLinkService : IJiraLinkService
     {
         var key = NormalizeKey(request.JiraKey, request.JiraUrl);
         var title = await ResolveTitleAsync(request.Title, key);
-        var task = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType);
+        var (task, _) = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType, null);
         if (string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
         {
             await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = TaskStatuses.Doing });
@@ -100,8 +107,13 @@ public sealed class JiraLinkService : IJiraLinkService
     {
         var key = NormalizeKey(request.JiraKey, request.JiraUrl);
         var title = await ResolveTitleAsync(request.Title, key);
-        var task = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType);
+        var (task, registeredNew) = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType, request.Ownership);
         await TryAssignAsync(key);
+        if (registeredNew && !ActivityJira.IsActivity(key))
+        {
+            await _inbox.AddNewTaskAsync(task.Id, key, task.Title, task.CreatedAt);
+        }
+
         var match = await _links.GetByKeyAsync(key);
         var focus = await _focus.GetAsync();
         var focusLink = focus.TaskId is int focusTaskId
@@ -110,7 +122,7 @@ public sealed class JiraLinkService : IJiraLinkService
         return Result(key, request.JiraUrl, task.Title, "registered", match, focus, focusLink?.JiraKey);
     }
 
-    private async Task<TaskDto> EnsureLinkedTaskAsync(string key, string title, string? jiraUrl, string? energyType)
+    private async Task<(TaskDto Task, bool RegisteredNew)> EnsureLinkedTaskAsync(string key, string title, string? jiraUrl, string? energyType, string? ownership)
     {
         var energy = string.IsNullOrWhiteSpace(energyType) ? EnergyTypes.Deep : energyType.Trim();
         if (!EnergyTypes.All.Contains(energy))
@@ -122,11 +134,13 @@ public sealed class JiraLinkService : IJiraLinkService
         TaskDto task;
         if (match is null)
         {
-            var storedTitle = title.Contains(key, StringComparison.OrdinalIgnoreCase)
+            var storedTitle = ActivityJira.IsActivity(key)
                 ? title
-                : title.Length > key.Length
+                : title.Contains(key, StringComparison.OrdinalIgnoreCase)
                     ? title
-                    : $"{key} {title}";
+                    : title.Length > key.Length
+                        ? title
+                        : $"{key} {title}";
             var sameDay = await _tasks.FindSameTitleTodayAsync(storedTitle);
             if (sameDay is not null)
             {
@@ -138,16 +152,24 @@ public sealed class JiraLinkService : IJiraLinkService
                 {
                     Title = storedTitle,
                     EnergyType = energy,
-                    TagList = ["jira"]
+                    TagList = ["jira"],
+                    Ownership = TaskOwnerships.Normalize(ownership)
                 });
             }
 
             await _links.UpsertAsync(task.Id, key, jiraUrl, 1, TaskMapping.Now());
-            return task;
+            return (task, true);
         }
 
         task = await _tasks.GetAsync(match.TaskId) ?? throw new InvalidOperationException("Task not found.");
-        if (IsJunkTitle(task.Title, key) && !IsJunkTitle(title, key))
+        var activityTitle = ActivityJira.TitleFor(key);
+        if (!string.IsNullOrWhiteSpace(activityTitle))
+        {
+            title = activityTitle;
+        }
+        if ((IsJunkTitle(task.Title, key) || !string.IsNullOrWhiteSpace(activityTitle))
+            && !IsJunkTitle(title, key)
+            && !string.Equals(task.Title, title, StringComparison.Ordinal))
         {
             await _tasks.UpdateAsync(task.Id, new UpdateTaskRequest
             {
@@ -161,11 +183,17 @@ public sealed class JiraLinkService : IJiraLinkService
         }
 
         await _links.UpsertAsync(task.Id, key, jiraUrl ?? match.JiraUrl, match.OpenCount, TaskMapping.Now());
-        return task;
+        return (task, false);
     }
 
     private async Task<string> ResolveTitleAsync(string? raw, string key)
     {
+        var activityTitle = ActivityJira.TitleFor(key);
+        if (!string.IsNullOrWhiteSpace(activityTitle))
+        {
+            return activityTitle;
+        }
+
         var title = CleanTitle(raw, key);
         if (!IsJunkTitle(title, key))
         {
@@ -181,6 +209,16 @@ public sealed class JiraLinkService : IJiraLinkService
         if (!key.StartsWith("PS-", StringComparison.OrdinalIgnoreCase))
         {
             return;
+        }
+
+        var match = await _links.GetByKeyAsync(key);
+        if (match is not null)
+        {
+            var task = await _tasks.GetAsync(match.TaskId);
+            if (task is not null && string.Equals(task.Ownership, TaskOwnerships.Other, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
         }
 
         try
@@ -257,6 +295,17 @@ public sealed class JiraLinkService : IJiraLinkService
         if (text.Contains("jira.smartx.ir", StringComparison.OrdinalIgnoreCase)
             || text.Contains("://", StringComparison.OrdinalIgnoreCase)
             || text.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (text.All(ch => ch == '?' || char.IsWhiteSpace(ch) || ch == '\uFFFD'))
+        {
+            return true;
+        }
+
+        var withoutKey = text.Replace(key, string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
+        if (withoutKey.Length == 0 || withoutKey.All(ch => ch == '?' || char.IsWhiteSpace(ch) || ch == '\uFFFD'))
         {
             return true;
         }

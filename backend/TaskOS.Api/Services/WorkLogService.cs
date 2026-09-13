@@ -48,7 +48,7 @@ public sealed class WorkLogService : IWorkLogService
         var description = await SanitizeDescriptionAsync(request, source);
         if (IsAutomatic(source) && request.TaskId is int taskId)
         {
-            var recent = await _logs.FindRecentAsync(taskId, source, TimeSpan.FromMinutes(2));
+            var recent = await _logs.FindRecentAsync(taskId, source, TimeSpan.FromMinutes(6));
             if (recent is not null)
             {
                 if (minutes <= recent.DurationMinutes)
@@ -57,8 +57,22 @@ public sealed class WorkLogService : IWorkLogService
                 }
 
                 var extra = minutes - recent.DurationMinutes;
+                if (DateTime.TryParse(recent.CreatedAt, out var recentAt))
+                {
+                    var recentUtc = recentAt.Kind == DateTimeKind.Unspecified
+                        ? DateTime.SpecifyKind(recentAt, DateTimeKind.Utc)
+                        : recentAt.ToUniversalTime();
+                    var sinceRecent = (int)Math.Round((DateTime.UtcNow - recentUtc).TotalMinutes);
+                    extra = Math.Min(extra, Math.Max(0, sinceRecent + 1));
+                }
+
+                if (extra < 1)
+                {
+                    return ToDto(recent);
+                }
+
                 await _logs.AddMinutesAsync(recent.Id, extra);
-                recent.DurationMinutes = minutes;
+                recent.DurationMinutes += extra;
                 await TryPostJiraWorklogAsync(taskId, extra);
                 return ToDto(recent);
             }
@@ -89,29 +103,52 @@ public sealed class WorkLogService : IWorkLogService
     public async Task<IReadOnlyList<WorkLogDto>> ListByDateAsync(string logDate)
     {
         var date = NormalizeDate(logDate);
-        var rows = await _logs.ListByDateAsync(date);
+        var rows = (await _logs.ListByDateAsync(date)).ToList();
+        await ReconcileJiraDurationsAsync(rows);
         return rows.Select(ToDto).ToList();
     }
 
     public async Task<WorkLogSummaryDto> GetSummaryAsync(string logDate)
     {
         var date = NormalizeDate(logDate);
-        var rows = await _logs.ListByDateAsync(date);
+        var rows = (await _logs.ListByDateAsync(date)).ToList();
+        await ReconcileJiraDurationsAsync(rows);
         return WorkLogClusterer.Cluster(date, rows, _clusterThreshold);
     }
 
     public async Task<EntityWorkLogDto> ListByTaskAsync(int taskId)
     {
-        var rows = await _logs.ListByTaskAsync(taskId);
+        var rows = (await _logs.ListByTaskAsync(taskId)).ToList();
+        await ReconcileJiraDurationsAsync(rows);
         return ToEntity(rows);
     }
 
     public async Task<EntityWorkLogDto> ListByProblemAsync(int problemId)
     {
-        var rows = await _logs.ListByProblemAsync(problemId);
+        var rows = (await _logs.ListByProblemAsync(problemId)).ToList();
+        await ReconcileJiraDurationsAsync(rows);
         return ToEntity(rows);
     }
 
+    public async Task<WorkLogDto> UpdateDescriptionAsync(int id, string description)
+    {
+        var existing = await _logs.GetByIdAsync(id);
+        if (existing is null)
+        {
+            throw new KeyNotFoundException("Work log was not found.");
+        }
+
+        var text = (description ?? string.Empty).Trim();
+        if (text.Length == 0)
+        {
+            text = "کار";
+        }
+
+        await _logs.SetDescriptionAsync(id, text);
+        var updated = await _logs.GetByIdAsync(id) ?? existing;
+        updated.Description = text;
+        return ToDto(updated);
+    }
     public static WorkLogDto ToDto(WorkLogEntry entry) => new()
     {
         Id = entry.Id,
@@ -121,12 +158,19 @@ public sealed class WorkLogService : IWorkLogService
         TaskId = entry.TaskId,
         ProblemId = entry.ProblemId,
         CreatedAt = entry.CreatedAt,
-        JiraWorklogId = entry.JiraWorklogId
+        JiraWorklogId = entry.JiraWorklogId,
+        TaskTitle = entry.TaskTitle,
+        JiraKey = entry.JiraKey,
+        ProblemTitle = entry.ProblemTitle
     };
 
     private async Task<string> SanitizeDescriptionAsync(CaptureWorkLogRequest request, string source)
     {
         var text = (request.Description ?? string.Empty).Trim();
+        if (source.Equals(WorkLogSources.Break, StringComparison.OrdinalIgnoreCase))
+        {
+            return text.Length == 0 ? "استراحت" : text;
+        }
         if (request.TaskId is int taskId)
         {
             var task = await _tasks.GetAsync(taskId);
@@ -143,6 +187,52 @@ public sealed class WorkLogService : IWorkLogService
         }
 
         return text.Length == 0 ? "کار" : text;
+    }
+
+    private async Task ReconcileJiraDurationsAsync(IList<WorkLogEntry> rows)
+    {
+        var keys = rows
+            .Select(row => row.JiraKey)
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        foreach (var key in keys)
+        {
+            IReadOnlyList<JiraWorklogItem> remote;
+            try
+            {
+                remote = await _jiraRest.ListWorklogsAsync(key!);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Jira worklog read failed for {JiraKey}", key);
+                continue;
+            }
+
+            var byId = new Dictionary<string, JiraWorklogItem>(StringComparer.Ordinal);
+            foreach (var item in remote)
+            {
+                if (!string.IsNullOrWhiteSpace(item.Id))
+                {
+                    byId[item.Id] = item;
+                }
+            }
+
+            foreach (var row in rows)
+            {
+                if (!string.Equals(row.JiraKey, key, StringComparison.OrdinalIgnoreCase)
+                    || string.IsNullOrWhiteSpace(row.JiraWorklogId)
+                    || !byId.TryGetValue(row.JiraWorklogId, out var jira)
+                    || jira.Minutes == row.DurationMinutes)
+                {
+                    continue;
+                }
+
+                await _logs.SetDurationMinutesAsync(row.Id, jira.Minutes);
+                row.DurationMinutes = jira.Minutes;
+            }
+        }
     }
 
     private async Task<string?> TryPostJiraWorklogAsync(int taskId, int minutes)

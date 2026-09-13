@@ -12,4 +12,6 @@ public interface ISettingsService
     Task SaveRestResumeAsync(int? taskId, int? problemId, string description);
     Task<(int? TaskId, int? ProblemId, string Description)> PeekRestResumeAsync();
     Task<(int? TaskId, int? ProblemId, string Description)> ConsumeRestResumeAsync();
+    Task SetRestNoteAsync(string? note);
+    Task<string> GetRestNoteAsync();
 }

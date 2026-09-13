@@ -35,6 +35,39 @@ export function getJiraCreateMeta(projectKey: string) {
   return api.get<JiraCreateMeta>(`/api/jira/create-meta?projectKey=${encodeURIComponent(projectKey)}`)
 }
 
+export function registerJiraIssue(input: { jiraKey: string; title?: string; jiraUrl?: string }) {
+  return api
+    .post<{
+      jiraKey?: string
+      title?: string
+      matchedTask?: { id: number; title: string; status?: string }
+      registered?: { matchedTask?: { id: number; title: string; status?: string } }
+    }>('/api/jira/register', input)
+    .catch(() =>
+      api.post<{
+        registered?: { matchedTask?: { id: number; title: string; status?: string } }
+        matchedTask?: { id: number; title: string; status?: string }
+      }>('/api/jira/import', input),
+    )
+    .then((row) => ({
+      jiraKey: row.jiraKey,
+      title: row.title,
+      matchedTask: row.matchedTask ?? row.registered?.matchedTask,
+    }))
+}
+
+export function fetchJiraIssueSummary(jiraKey: string) {
+  return fetch(`/jira-rest/rest/api/2/issue/${encodeURIComponent(jiraKey)}?fields=summary,status`).then(async (response) => {
+    if (!response.ok) return null
+    const data = await response.json()
+    return {
+      key: String(data?.key ?? jiraKey),
+      title: String(data?.fields?.summary ?? jiraKey),
+      status: String(data?.fields?.status?.name ?? ''),
+    }
+  })
+}
+
 export function createJiraTask(input: {
   title: string
   projectKey: string
@@ -64,6 +97,36 @@ export function isJiraWorklogEdited(log: Pick<JiraIssueWorklog, 'created' | 'upd
 
 export function jiraWorklogMinutes(log: Pick<JiraIssueWorklog, 'timeSpentSeconds'>) {
   return Math.max(0, Math.round(Number(log.timeSpentSeconds || 0) / 60))
+}
+
+export function isJiraNewStatus(name: string) {
+  const value = name.trim().toLowerCase()
+  if (!value || isJiraClosedStatus(value)) return false
+  if (
+    value === 'در حال بررسی محصول' ||
+    value.includes('in progress') ||
+    value === 'doing' ||
+    value === 'در حال انجام'
+  ) {
+    return false
+  }
+  return (
+    value === 'waiting for review' ||
+    value === 'waiting for support' ||
+    value === 'waiting for customer' ||
+    value === 'pending' ||
+    value === 'to do' ||
+    value === 'todo' ||
+    value === 'open' ||
+    value === 'new' ||
+    value === 'backlog' ||
+    value === 'reopened' ||
+    value === 'assigned' ||
+    value.includes('waiting') ||
+    value.includes('pending') ||
+    value.includes('در انتظار') ||
+    value.includes('منتظر بررسی')
+  )
 }
 
 export function isJiraClosedStatus(name: string) {
@@ -102,9 +165,10 @@ export interface JiraIssueThread {
 
 function asJiraPerson(value: unknown): JiraCommentAuthor | null {
   if (!value || typeof value !== 'object') return null
-  const row = value as { name?: string; displayName?: string }
-  if (!row.name && !row.displayName) return null
-  return { name: row.name, displayName: row.displayName }
+  const row = value as { name?: string; key?: string; displayName?: string }
+  const name = row.name || row.key
+  if (!name && !row.displayName) return null
+  return { name, displayName: row.displayName }
 }
 
 export function getJiraIssueThread(jiraKey: string) {
@@ -154,18 +218,31 @@ export function listJiraIssueWorklogs(jiraKey: string) {
   })
 }
 
+export interface JiraIssueState {
+  key: string
+  status: string
+  assignee?: JiraCommentAuthor | null
+}
+
 export function searchJiraIssueStatuses(keys: string[]) {
   const unique = [...new Set(keys.filter(Boolean))]
-  if (unique.length === 0) return Promise.resolve([] as { key: string; status: string }[])
-  const jql = `key in (${unique.join(',')})`
-  return fetch(
-    `/jira-rest/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=status&maxResults=100`,
-  ).then(async (response) => {
-    if (!response.ok) throw new Error('jira search failed')
-    const data = await response.json()
-    return (Array.isArray(data?.issues) ? data.issues : []).map((issue: { key?: string; fields?: { status?: { name?: string } } }) => ({
-      key: String(issue.key ?? ''),
-      status: String(issue.fields?.status?.name ?? ''),
-    }))
-  })
+  if (unique.length === 0) return Promise.resolve([] as JiraIssueState[])
+  const batches: string[][] = []
+  for (let i = 0; i < unique.length; i += 40) batches.push(unique.slice(i, i + 40))
+  return Promise.all(
+    batches.map((batch) => {
+      const jql = `key in (${batch.join(',')})`
+      return fetch(
+        `/jira-rest/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=status,assignee&maxResults=50`,
+      ).then(async (response) => {
+        if (!response.ok) throw new Error('jira search failed')
+        const data = await response.json()
+        return (Array.isArray(data?.issues) ? data.issues : []).map((issue: { key?: string; fields?: { status?: { name?: string }; assignee?: JiraCommentAuthor | null } }) => ({
+          key: String(issue.key ?? ''),
+          status: String(issue.fields?.status?.name ?? ''),
+          assignee: asJiraPerson(issue.fields?.assignee),
+        })) as JiraIssueState[]
+      })
+    }),
+  ).then((rows) => rows.flat())
 }

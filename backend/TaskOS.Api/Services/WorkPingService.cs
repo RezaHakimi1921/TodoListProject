@@ -373,7 +373,6 @@ public sealed class WorkPingService : IWorkPingService
 
                 if (work.Kind == "current")
                 {
-                    await _focus.TickAsync(new FocusActionRequest { DurationMinutes = result.Minutes, Source = "Timer" });
                     await ApplyEnergyAsync(work.Id, result.EnergyType);
                     break;
                 }

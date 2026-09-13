@@ -98,7 +98,7 @@ export function getInitialMockStore(): MockStore {
       {
         id: 1,
         title: 'انتخاب معماری کش مناسب برای پاسخ‌دهی سریع گزارشات بدون فشار بر سرور',
-        status: 'Chosen',
+        status: 'Monitoring',
         noTimeNote: 'استفاده از MemoryCache توکار دات‌نت بدون هیچ زیرساخت خارجی',
         infiniteTimeNote: 'پیاده‌سازی کلاستر Redis توزیع‌شده با قابلیت Failover و پایپ‌لاین نویسی کامل',
         chosenOptionId: 101,

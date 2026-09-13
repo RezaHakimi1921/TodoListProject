@@ -9,6 +9,7 @@ public sealed class WorkFocusDto
     public string? StartedAt { get; set; }
     public string? UpdatedAt { get; set; }
     public bool IsResting { get; set; }
+    public string? Note { get; set; }
     public JiraSwitchPendingDto? PendingSwitch { get; set; }
 }
 
@@ -33,4 +34,5 @@ public sealed class FocusActionRequest
 public sealed class StartRestRequest
 {
     public string? Description { get; set; }
+    public string? Note { get; set; }
 }

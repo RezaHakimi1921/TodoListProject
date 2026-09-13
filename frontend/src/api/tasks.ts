@@ -28,6 +28,20 @@ const camel = (row: Record<string, unknown>): TaskItem => ({
   jiraKey: (row.jiraKey as string | null) ?? null,
   jiraUrl: (row.jiraUrl as string | null) ?? null,
   ownership: asOwnership(row.ownership),
+  assigneeName: (row.assigneeName as string | null) ?? null,
+  assigneeDisplay: (row.assigneeDisplay as string | null) ?? null,
+  pinned: Boolean(row.pinned),
+  problems: Array.isArray(row.problems)
+    ? (row.problems as Record<string, unknown>[]).map((item) => ({
+        id: Number(item.id),
+        title: String(item.title ?? ''),
+        status: (item.status === 'Monitoring' || item.status === 'Chosen'
+          ? 'Monitoring'
+          : item.status === 'Resolved' || item.status === 'Validated'
+            ? 'Resolved'
+            : 'Open') as 'Open' | 'Monitoring' | 'Resolved',
+      }))
+    : [],
 })
 
 export interface TaskFilters {
@@ -36,6 +50,7 @@ export interface TaskFilters {
   tag?: string
   date?: string
   q?: string
+  includeDone?: boolean
 }
 
 export interface TaskDay {
@@ -45,7 +60,15 @@ export interface TaskDay {
 }
 
 export function listTaskDays() {
-  return api.get<TaskDay[]>('/api/tasks/days')
+  return api.get<Array<Record<string, unknown>>>('/api/tasks/days').then((rows) =>
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => ({
+        date: String(row.date ?? row.Date ?? row.day ?? row.Day ?? ''),
+        total: Number(row.total ?? row.Total ?? 0),
+        done: Number(row.done ?? row.Done ?? 0),
+      }))
+      .filter((row) => Boolean(row.date)),
+  )
 }
 
 export function listTasks(filters: TaskFilters = {}) {
@@ -55,6 +78,7 @@ export function listTasks(filters: TaskFilters = {}) {
   if (filters.tag) params.set('tag', filters.tag)
   if (filters.date) params.set('date', filters.date)
   if (filters.q) params.set('q', filters.q)
+  if (filters.includeDone) params.set('includeDone', 'true')
   const query = params.toString()
   return api.get<Record<string, unknown>[]>(`/api/tasks${query ? `?${query}` : ''}`).then((rows) =>
     rows.map(camel),
@@ -127,4 +151,7 @@ export function addTimeline(id: number, note: string) {
 
 export function deleteTimeline(id: number, entryId: number) {
   return api.delete(`/api/tasks/${id}/timeline/${entryId}`)
+}
+export function setTaskPinned(id: number, pinned: boolean) {
+  return api.put<Record<string, unknown>>(`/api/tasks/${id}/pin`, { pinned }).then(camel)
 }

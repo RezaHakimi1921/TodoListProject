@@ -1,7 +1,10 @@
 import { api } from './client'
 
+export type NotificationKind = 'comment' | 'new-task'
+
 export interface CommentNotification {
   id: number
+  kind: NotificationKind
   taskId: number
   taskTitle: string
   taskStatus: string
@@ -19,15 +22,28 @@ export interface NotificationSummary {
   items: CommentNotification[]
 }
 
+export interface UnreadNotificationCount {
+  count: number
+  newTasks: number
+  comments: number
+}
+
+function asKind(value: unknown, commentId: string): NotificationKind {
+  if (value === 'new-task' || String(commentId).startsWith('new-task:')) return 'new-task'
+  return 'comment'
+}
+
 function camel(row: Record<string, unknown>): CommentNotification {
+  const commentId = String(row.commentId ?? '')
   return {
     id: Number(row.id),
+    kind: asKind(row.kind, commentId),
     taskId: Number(row.taskId),
     taskTitle: String(row.taskTitle ?? ''),
     taskStatus: String(row.taskStatus ?? ''),
     jiraKey: String(row.jiraKey ?? ''),
     jiraUrl: (row.jiraUrl as string | null) ?? null,
-    commentId: String(row.commentId ?? ''),
+    commentId,
     authorName: String(row.authorName ?? ''),
     body: String(row.body ?? ''),
     createdAt: String(row.createdAt ?? ''),
@@ -43,8 +59,19 @@ export function listNotifications(unread = false) {
   }))
 }
 
-export function getUnreadNotificationCount() {
-  return api.get<{ count: number }>('/api/notifications/unread-count').then((row) => Number(row.count ?? 0))
+export function getUnreadNotificationCount(): Promise<UnreadNotificationCount> {
+  return api.get<UnreadNotificationCount>('/api/notifications/unread-count').then((row) => ({
+    count: Number(row.count ?? 0),
+    newTasks: Number(row.newTasks ?? 0),
+    comments: Number(row.comments ?? 0),
+  }))
+}
+
+export const TASK_NOTIFICATIONS_READ = 'taskos:task-notifications-read'
+
+export function emitTaskNotificationsRead(taskId: number) {
+  if (!Number.isFinite(taskId)) return
+  window.dispatchEvent(new CustomEvent(TASK_NOTIFICATIONS_READ, { detail: { taskId } }))
 }
 
 export function markNotificationRead(id: number) {
@@ -52,5 +79,10 @@ export function markNotificationRead(id: number) {
 }
 
 export function markTaskNotificationsRead(taskId: number) {
+  emitTaskNotificationsRead(taskId)
   return api.post<{ ok: boolean }>(`/api/notifications/read-task/${taskId}`, {})
+}
+
+export function markNotificationsReadByKey(jiraKey: string) {
+  return api.post<{ ok: boolean }>(`/api/notifications/read-key/${encodeURIComponent(jiraKey)}`, {})
 }

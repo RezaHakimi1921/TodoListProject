@@ -8,6 +8,8 @@ public sealed class TaskJiraRow
     public string? Description { get; set; }
     public int OpenCount { get; set; }
     public string? LastSeenAt { get; set; }
+    public string? AssigneeName { get; set; }
+    public string? AssigneeDisplay { get; set; }
     public string Title { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
 }
@@ -18,4 +20,5 @@ public interface ITaskJiraRepository
     Task<TaskJiraRow?> GetByTaskIdAsync(int taskId);
     Task<IReadOnlyList<TaskJiraRow>> ListByTaskIdsAsync(IReadOnlyCollection<int> taskIds);
     Task UpsertAsync(int taskId, string jiraKey, string? jiraUrl, int openCount, string lastSeenAt);
+    Task SetAssigneeAsync(int taskId, string? name, string? display);
 }

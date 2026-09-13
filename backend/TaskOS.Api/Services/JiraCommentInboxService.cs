@@ -25,6 +25,8 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
 
     public Task<int> CountUnreadAsync() => _inbox.CountUnreadAsync();
 
+    public Task<(int NewTasks, int Comments)> CountUnreadByKindAsync() => _inbox.CountUnreadByKindAsync();
+
     public Task<bool> AddIncomingAsync(
         int taskId,
         string jiraKey,
@@ -45,26 +47,57 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
         });
     }
 
+    public Task<bool> AddNewTaskAsync(int taskId, string jiraKey, string title, string createdAt)
+    {
+        var key = jiraKey.Trim().ToUpperInvariant();
+        return _inbox.InsertIfNewAsync(new JiraCommentInboxEntry
+        {
+            TaskId = taskId,
+            JiraKey = key,
+            CommentId = "new-task:" + key,
+            AuthorName = "جیرا",
+            Body = string.IsNullOrWhiteSpace(title) ? "تسک جدید ثبت شد" : title.Trim(),
+            CreatedAt = string.IsNullOrWhiteSpace(createdAt) ? TaskMapping.Now() : createdAt.Trim(),
+            ReceivedAt = TaskMapping.Now()
+        });
+    }
+
+    public Task SeedRecentNewTasksAsync()
+    {
+        var now = DateTime.UtcNow;
+        return _inbox.SeedRecentNewTasksAsync(
+            now.AddHours(-30).ToString("o"),
+            now.Date.ToString("o"),
+            TaskMapping.Now());
+    }
+
     public Task MarkReadAsync(int id) =>
         _inbox.MarkReadAsync(id, TaskMapping.Now());
 
     public Task MarkReadByTaskAsync(int taskId) =>
         _inbox.MarkReadByTaskAsync(taskId, TaskMapping.Now());
 
+    public Task MarkReadByJiraKeyAsync(string jiraKey) =>
+        _inbox.MarkReadByJiraKeyAsync(jiraKey, TaskMapping.Now());
+
     private static NotificationDto ToDto(JiraCommentInboxEntry entry) => new()
     {
         Id = entry.Id,
         TaskId = entry.TaskId,
+        Kind = IsNewTask(entry.CommentId) ? "new-task" : "comment",
         TaskTitle = entry.TaskTitle,
         TaskStatus = entry.TaskStatus,
         JiraKey = entry.JiraKey,
         JiraUrl = entry.JiraUrl,
         CommentId = entry.CommentId,
         AuthorName = entry.AuthorName,
-        Body = entry.Body,
+        Body = IsNewTask(entry.CommentId) ? "تسک جدید ثبت شد" : entry.Body,
         CreatedAt = entry.CreatedAt,
         Read = !string.IsNullOrWhiteSpace(entry.SeenAt)
     };
+
+    private static bool IsNewTask(string? commentId) =>
+        (commentId ?? string.Empty).StartsWith("new-task:", StringComparison.OrdinalIgnoreCase);
 
     private static string TrimBody(string? body)
     {

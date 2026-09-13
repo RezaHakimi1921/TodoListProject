@@ -16,6 +16,20 @@ public sealed class JiraStartRequest
     public bool MarkPreviousDone { get; set; }
     public int? DurationMinutes { get; set; }
     public string? EnergyType { get; set; }
+    public string? Ownership { get; set; }
+}
+
+public sealed class JiraCreateTaskRequest
+{
+    public string Title { get; set; } = string.Empty;
+    public string? ProjectKey { get; set; }
+    public string? Description { get; set; }
+    public string? EnergyType { get; set; }
+    public string? Ownership { get; set; }
+    public string? IssueTypeId { get; set; }
+    public string? IssueTypeName { get; set; }
+    public string? ComponentId { get; set; }
+    public string? AssigneeName { get; set; }
 }
 
 public sealed class AddJiraCommentRequest

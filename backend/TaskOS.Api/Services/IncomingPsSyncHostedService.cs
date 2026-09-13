@@ -28,6 +28,7 @@ public sealed class IncomingPsSyncHostedService : BackgroundService
             using var scope = _scopes.CreateScope();
             var jiraRest = scope.ServiceProvider.GetRequiredService<IJiraRestClient>();
             var links = scope.ServiceProvider.GetRequiredService<IJiraLinkService>();
+            var inbox = scope.ServiceProvider.GetRequiredService<IJiraCommentInboxService>();
             var issues = await jiraRest.ListUnassignedProductSupportAsync(stoppingToken);
             foreach (var issue in issues)
             {
@@ -41,6 +42,8 @@ public sealed class IncomingPsSyncHostedService : BackgroundService
                 });
                 _logger.LogInformation("Assigned and registered {Key}", issue.Key);
             }
+
+            await inbox.SeedRecentNewTasksAsync();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

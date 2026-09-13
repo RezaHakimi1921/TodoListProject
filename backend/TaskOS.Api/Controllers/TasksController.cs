@@ -11,12 +11,14 @@ public sealed class TasksController : ControllerBase
     private readonly ITaskService _tasks;
     private readonly ITaskChecklistService _checklist;
     private readonly ITrashService _trash;
+    private readonly IProblemService _problems;
 
-    public TasksController(ITaskService tasks, ITaskChecklistService checklist, ITrashService trash)
+    public TasksController(ITaskService tasks, ITaskChecklistService checklist, ITrashService trash, IProblemService problems)
     {
         _tasks = tasks;
         _checklist = checklist;
         _trash = trash;
+        _problems = problems;
     }
 
     [HttpGet]
@@ -25,9 +27,10 @@ public sealed class TasksController : ControllerBase
         [FromQuery] string? energyType,
         [FromQuery] string? tag,
         [FromQuery] string? date,
-        [FromQuery] string? q)
+        [FromQuery] string? q,
+        [FromQuery] bool includeDone = false)
     {
-        return Ok(await _tasks.ListAsync(status, energyType, tag, date, q));
+        return Ok(await _tasks.ListAsync(status, energyType, tag, date, q, includeDone));
     }
 
     [HttpGet("similar")]
@@ -45,6 +48,13 @@ public sealed class TasksController : ControllerBase
     {
         var task = await _tasks.GetAsync(id);
         return task is null ? NotFound() : Ok(task);
+    }
+
+    [HttpGet("{id:int}/problems")]
+    public async Task<ActionResult<IReadOnlyList<ProblemLinkDto>>> Problems(int id)
+    {
+        var task = await _tasks.GetAsync(id);
+        return task is null ? NotFound() : Ok(await _problems.ListByTaskAsync(id));
     }
 
     [HttpPost]
@@ -79,6 +89,13 @@ public sealed class TasksController : ControllerBase
     public async Task<IActionResult> Delete(int id)
     {
         return await _tasks.DeleteAsync(id) ? NoContent() : NotFound();
+    }
+
+    [HttpPut("{id:int}/pin")]
+    public async Task<ActionResult<TaskDto>> SetPin(int id, [FromBody] SetTaskPinRequest request)
+    {
+        var updated = await _tasks.SetPinnedAsync(id, request?.Pinned ?? false);
+        return updated is null ? NotFound() : Ok(updated);
     }
 
     [HttpPut("{id:int}/status")]

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { 
   CheckCircle2, 
@@ -13,15 +12,19 @@ import {
   Feather,
   ChevronDown,
   RotateCcw,
-  ExternalLink
+  ExternalLink,
+  Pin
 } from 'lucide-react'
-import { deleteTask, updateTask, updateTaskStatus } from '../api/tasks'
+import { finishFocus, getFocus } from '../api/focus'
+import { deleteTask, setTaskPinned, updateTask, updateTaskStatus } from '../api/tasks'
 import { requestTaskFocus } from '../lib/focusSwitch'
+import { onFocusedTaskDone } from '../lib/resumePreviousFocus'
 import { TagChipList } from './TagChips'
 import { useTrashConfirm } from './ConfirmProvider'
 import type { TaskItem, TaskStatus } from '../types'
-import { FOCUS_PAUSED_REASON, isFocusPaused, statusLabel } from '../types'
+import { FOCUS_PAUSED_REASON, isFocusPaused, ownerLabel, statusLabel } from '../types'
 import { taskJiraKey, taskJiraUrl } from '../lib/jira'
+import { TaskProblemLinks } from './TaskProblemLinks'
 
 interface Props {
   key?: string | number
@@ -35,6 +38,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
   const askTrash = useTrashConfirm()
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [statusError, setStatusError] = useState('')
+  const pinned = Boolean(task.pinned)
 
   useEffect(() => {
     if (!showStatusMenu) return
@@ -66,6 +70,18 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
           })
         }
         setShowStatusMenu(false)
+        if (next === 'Done') {
+          const cached = queryClient.getQueryData<TaskItem[]>(['tasks'])
+          await onFocusedTaskDone(task.id, cached)
+          void queryClient.invalidateQueries({ queryKey: ['focus'] })
+          void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+        } else if (next === 'Stuck') {
+          const focus = await getFocus().catch(() => null)
+          if (focus?.taskId === task.id) {
+            await finishFocus({ markTaskDone: false }).catch(() => undefined)
+            void queryClient.invalidateQueries({ queryKey: ['focus'] })
+          }
+        }
         void queryClient.invalidateQueries({ queryKey: ['tasks'] })
         void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
       })
@@ -78,6 +94,14 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
       void queryClient.invalidateQueries({ queryKey: ['focus'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
       void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
+    },
+  })
+
+  const pinMutation = useMutation({
+    mutationFn: () => setTaskPinned(task.id, !pinned),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
     },
   })
 
@@ -104,17 +128,20 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
     <div
       id={`task-item-${task.id}`}
       className={`group relative rounded-xl border p-3.5 sm:p-4 transition-all duration-200 ${
-        isDone
+        showStatusMenu ? 'z-[70]' : ''
+      } ${
+        pinned
+          ? 'border-amber-400/70 bg-amber-400/[0.08] shadow-lg shadow-amber-950/30 hover:-translate-y-1 hover:border-amber-300'
+          : isDone
           ? 'border-white/[0.04] bg-black/20 opacity-55 hover:opacity-80'
           : isDoing
-          ? 'border-white/20 bg-[#121623] shadow-md shadow-black/30'
+          ? 'border-white/20 bg-[#121623] shadow-md shadow-black/30 hover:-translate-y-0.5'
           : isStuck
-          ? 'border-rose-500/20 bg-[#161216]/60'
-          : 'border-white/[0.07] bg-[#10131b] hover:border-white/[0.14] hover:bg-[#131622] shadow-sm'
+          ? 'border-rose-500/20 bg-[#161216]/60 hover:-translate-y-0.5'
+          : 'border-white/[0.07] bg-[#10131b] hover:-translate-y-0.5 hover:border-white/[0.18] hover:bg-[#131622] hover:shadow-lg hover:shadow-black/30'
       }`}
     >
       <div className="flex items-start gap-3">
-        {/* Done Checkbox */}
         <button
           id={`btn-toggle-done-${task.id}`}
           type="button"
@@ -133,10 +160,8 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
           )}
         </button>
 
-        {/* Main Content */}
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1.5">
-            {/* Energy Indicator */}
             <span
               className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded ${
                 task.energyType === 'Deep'
@@ -148,6 +173,13 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
               {task.energyType === 'Deep' ? 'تمرکز عمیق' : 'کار سبک'}
             </span>
 
+            {pinned ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-100 border border-amber-300/40">
+                <Pin className="w-3 h-3 fill-amber-300" />
+                اولویت دارد
+              </span>
+            ) : null}
+
             <span
               className={`inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded border ${
                 task.ownership === 'Other'
@@ -155,10 +187,9 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
                   : 'bg-sky-500/10 text-sky-300 border-sky-500/20'
               }`}
             >
-              {task.ownership === 'Other' ? 'دیگری' : 'من'}
+              {ownerLabel(task)}
             </span>
 
-            {/* Status Dropdown */}
             <div className="relative">
               <button
                 id={`btn-status-dropdown-${task.id}`}
@@ -185,49 +216,28 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
 
               {showStatusMenu && (
                 <div 
-                  className="absolute right-0 top-full mt-1.5 z-50 w-44 rounded-xl border border-white/10 bg-[#141722] p-1 shadow-2xl backdrop-blur-md"
+                  className="absolute right-0 top-full mt-1.5 z-[80] w-44 rounded-xl border border-white/10 bg-[#141722] p-1 shadow-2xl backdrop-blur-md"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <button
-                    type="button"
-                    onClick={() => applyStatus('Open')}
-                    className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-white/[0.06] transition-colors"
-                  >
+                  <button type="button" onClick={() => applyStatus('Open')} className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-slate-300 hover:bg-white/[0.06] transition-colors">
                     باز برای اقدام
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => applyStatus('Doing')}
-                    className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-emerald-400 hover:bg-emerald-500/10 transition-colors font-medium"
-                  >
+                  <button type="button" onClick={() => applyStatus('Doing')} className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-emerald-400 hover:bg-emerald-500/10 transition-colors font-medium">
                     در حال انجام
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => applyStatus('Stuck', FOCUS_PAUSED_REASON)}
-                    className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-amber-300 hover:bg-amber-500/10 transition-colors font-medium"
-                  >
+                  <button type="button" onClick={() => applyStatus('Stuck', FOCUS_PAUSED_REASON)} className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-amber-300 hover:bg-amber-500/10 transition-colors font-medium">
                     در حال انجام متوقف شده
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => applyStatus('Stuck', 'سخته')}
-                    className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-rose-400 hover:bg-rose-500/10 transition-colors font-medium"
-                  >
+                  <button type="button" onClick={() => applyStatus('Stuck', 'سخته')} className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-rose-400 hover:bg-rose-500/10 transition-colors font-medium">
                     متوقف / گیر کرده
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => applyStatus('Done')}
-                    className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-white/[0.06] transition-colors"
-                  >
+                  <button type="button" onClick={() => applyStatus('Done')} className="w-full text-right px-2.5 py-1.5 rounded-lg text-xs text-slate-400 hover:bg-white/[0.06] transition-colors">
                     انجام شد
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Rollover badge if carried over from a previous day */}
             {task.rolledOver && !isDone && (
               <span 
                 className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.08] text-slate-400"
@@ -238,7 +248,6 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
               </span>
             )}
 
-            {/* Aging Indicator */}
             {task.isAging && !isDone && (
               <button
                 type="button"
@@ -252,7 +261,6 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
             )}
           </div>
 
-          {/* Title */}
           <h3
             onClick={() => onOpenDrawer(task)}
             className={`text-[13.5px] font-medium cursor-pointer transition-colors leading-relaxed ${
@@ -283,27 +291,43 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
             </p>
           )}
 
-          {/* Stuck Reason Callout */}
           {isStuck && task.stuckReason && (
             <div className="mt-2 flex items-center gap-1.5 rounded-lg bg-rose-500/[0.08] border border-rose-500/20 px-2.5 py-1 text-xs text-rose-300/90">
               <AlertCircle className="w-3.5 h-3.5 shrink-0 opacity-80" />
               <span>علت توقف: {task.stuckReason}</span>
             </div>
           )}
+          <div onClick={(event) => event.stopPropagation()}>
+            <TaskProblemLinks task={task} compact />
+          </div>
 
           {statusError && <p className="mt-2 text-[11px] text-rose-300">{statusError}</p>}
           <TagChipList tags={task.tags} />
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex items-center gap-0.5 opacity-60 group-hover:opacity-100 transition-opacity shrink-0">
-          {!isDone && !isDoing && (
+        <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            id={`btn-pin-task-${task.id}`}
+            type="button"
+            onClick={() => pinMutation.mutate()}
+            disabled={pinMutation.isPending}
+            className={`p-1.5 rounded-lg transition-all min-w-8 ${
+              pinned
+                ? 'opacity-100 text-amber-300 bg-amber-400/15 hover:bg-amber-400/25'
+                : 'opacity-100 text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] md:opacity-0 md:-translate-y-1 md:group-hover:opacity-100 md:group-hover:translate-y-0'
+            }`}
+            title={pinned ? 'برداشتن اولویت' : 'اولویت امروز'}
+          >
+            <Pin className={`w-3.5 h-3.5 ${pinned ? 'fill-amber-300' : ''}`} />
+          </button>
+
+          {!isDone && (
             <button
               id={`btn-start-focus-${task.id}`}
               type="button"
               onClick={() => focusMutation.mutate()}
               disabled={focusMutation.isPending}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] transition-all min-w-8"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] transition-all min-w-8 opacity-100 md:opacity-60 md:group-hover:opacity-100"
               title="شروع تمرکز عمیق روی این کار"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
@@ -314,7 +338,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
             id={`btn-edit-task-${task.id}`}
             type="button"
             onClick={() => onOpenDrawer(task)}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-white/[0.06] transition-colors opacity-100 md:opacity-60 md:group-hover:opacity-100"
             title="ویرایش جزئیات و یادداشت‌ها"
           >
             <Edit3 className="w-3.5 h-3.5" />
@@ -324,7 +348,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
             id={`btn-delete-task-${task.id}`}
             type="button"
             onClick={handleDelete}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 transition-colors opacity-100 md:opacity-60 md:group-hover:opacity-100"
             title="انتقال به سطل زباله"
           >
             <Trash2 className="w-3.5 h-3.5" />

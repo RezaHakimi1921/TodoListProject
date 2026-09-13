@@ -92,6 +92,18 @@ public sealed class SettingsService : ISettingsService
         return resume;
     }
 
+    public async Task SetRestNoteAsync(string? note)
+    {
+        using var connection = _factory.Create();
+        await WriteAsync(connection, "RestNote", (note ?? string.Empty).Trim());
+    }
+
+    public async Task<string> GetRestNoteAsync()
+    {
+        using var connection = _factory.Create();
+        var value = await connection.ExecuteScalarAsync<string>("SELECT Value FROM AppSettings WHERE Key = 'RestNote'");
+        return value?.Trim() ?? string.Empty;
+    }
     private static string? Get(IReadOnlyDictionary<string, string> rows, string key) =>
         rows.TryGetValue(key, out var value) ? value : null;
 

@@ -125,8 +125,33 @@ async function showPing() {
   })
 }
 
+
+async function markJiraNotificationsRead(key) {
+  if (!key) return
+  try {
+    await fetch(`${API}/api/notifications/read-key/${encodeURIComponent(key)}`, { method: 'POST' })
+  } catch {
+    /* API down */
+  }
+}
+
 function isProductSupport(key) {
   return /^PS-\d+$/i.test(String(key || ''))
+}
+
+function isClosedStatus(name) {
+  const value = String(name || '').trim().toLowerCase()
+  return [
+    'done',
+    'not solvable',
+    'canceled',
+    'cancelled',
+    'request completed',
+    'request cancelled',
+    'request canceled',
+    'انجام شده',
+    'لغو شده',
+  ].includes(value)
 }
 
 function isTaskOsUrl(url) {
@@ -157,7 +182,7 @@ function extractJiraKey(url) {
   try {
     const parsed = new URL(url)
     if (parsed.hostname !== JIRA_HOST) return null
-    const path = parsed.pathname.match(/\/(?:browse|issues)\/([A-Z][A-Z0-9]+-\d+)/i)
+    const path = parsed.pathname.match(/\/(?:browse|issues|projects\/[^/]+\/queues\/issue)\/([A-Z][A-Z0-9]+-\d+)/i)
     if (path) return path[1].toUpperCase()
     const hashParams = new URLSearchParams(parsed.hash.replace(/^#/, ''))
     const selected = parsed.searchParams.get('selectedIssue')
@@ -373,6 +398,8 @@ async function scheduleJiraCheckAsync(tab) {
     return
   }
 
+  void markJiraNotificationsRead(key)
+
   if (!isProductSupport(key)) {
     const watch = await readWatch()
     if (watch) await clearWatchAndApi(watch.key)
@@ -534,6 +561,11 @@ chrome.runtime.onMessage.addListener((message, sender) => {
       url: message.url,
       title: message.title,
     })
+    const status = String(message.status || '')
+    const key = String(message.key || '').trim().toUpperCase()
+    if (key && isClosedStatus(status)) {
+      void fetch(`${API}/api/jira/issues/${encodeURIComponent(key)}/sync-closed`, { method: 'POST' }).catch(() => undefined)
+    }
   }
   if (message && message.type === 'test-ping') {
     void showPing()
@@ -656,16 +688,6 @@ chrome.notifications.onButtonClicked.addListener(async (id, index) => {
 
   if (index === 0) {
     if (active) {
-      try {
-        await fetch(`${API}/api/focus/tick`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ durationMinutes: minutes, source: 'Timer' }),
-        })
-      } catch {
-        await openPopup('?source=Timer')
-        return
-      }
       await chrome.notifications.clear(NOTE_ID)
       return
     }

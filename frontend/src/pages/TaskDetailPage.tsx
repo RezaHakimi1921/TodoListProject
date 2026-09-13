@@ -17,13 +17,17 @@ import {
   updateTask,
   updateTaskStatus
 } from '../api/tasks'
+import { finishFocus, getFocus } from '../api/focus'
+import { setTaskPinned } from '../api/tasks'
 import { useTrashConfirm } from '../components/ConfirmProvider'
 import { EntityWorkLogs } from '../components/EntityWorkLogs'
 import { TaskChecklist } from '../components/TaskChecklist'
 import { TaskCommentThread } from '../components/TaskCommentThread'
 import { TagChipsEditor } from '../components/TagChips'
 import { TaskOwnershipToggle } from '../components/TaskOwnershipToggle'
-import { STUCK_REASONS, type EnergyType, type TaskOwnership, type TaskStatus } from '../types'
+import { TaskProblemLinks } from '../components/TaskProblemLinks'
+import { STUCK_REASONS, type EnergyType, type TaskItem, type TaskOwnership, type TaskStatus } from '../types'
+import { onFocusedTaskDone } from '../lib/resumePreviousFocus'
 import { taskJiraKey, taskJiraUrl } from '../lib/jira'
 
 export function TaskDetailPage() {
@@ -62,35 +66,56 @@ export function TaskDetailPage() {
     mutationFn: async () => {
       if (status === 'Stuck') {
         await updateTaskStatus(taskId, { status: 'Stuck', stuckReason: stuckReason || 'سخته' })
+        const focus = await getFocus().catch(() => null)
+        if (focus?.taskId === taskId) {
+          await finishFocus({ markTaskDone: false }).catch(() => undefined)
+        }
       }
-      return updateTask(taskId, {
+      const updated = await updateTask(taskId, {
         title: title.trim(),
         status,
         energyType,
         tags: tags.split(/[,،]+/).map((item) => item.trim()).filter(Boolean).join(','),
         ownership,
       })
+      if (status === 'Done') {
+        const cached = queryClient.getQueryData<TaskItem[]>(['tasks'])
+        await onFocusedTaskDone(taskId, cached)
+      }
+      return updated
     },
     onSuccess: () => {
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
       void queryClient.invalidateQueries({ queryKey: ['task', taskId] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['focus'] })
+      void queryClient.invalidateQueries({ queryKey: ['notifications'] })
     },
   })
 
   const ownershipMutation = useMutation({
-    mutationFn: (next: TaskOwnership) =>
-      updateTask(taskId, {
+    mutationFn: async (next: TaskOwnership) => {
+      const updated = await updateTask(taskId, {
         title: title.trim() || taskQuery.data?.title || '',
         status,
         energyType,
         tags: tags.split(/[,،]+/).map((item) => item.trim()).filter(Boolean).join(','),
         ownership: next,
-      }),
+      })
+      if (next === 'Other') {
+        await setTaskPinned(taskId, false).catch(() => undefined)
+        const focus = await getFocus().catch(() => null)
+        if (focus?.taskId === taskId) {
+          await finishFocus({ markTaskDone: false }).catch(() => undefined)
+        }
+      }
+      return updated
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['task', taskId] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['focus'] })
     },
   })
 
@@ -212,6 +237,7 @@ export function TaskDetailPage() {
 
         <TaskOwnershipToggle
           value={ownership}
+          otherLabel={taskQuery.data?.assigneeDisplay || taskQuery.data?.assigneeName || undefined}
           disabled={ownershipMutation.isPending}
           onChange={(next) => {
             setOwnership(next)
@@ -239,6 +265,7 @@ export function TaskDetailPage() {
             </select>
           </div>
         )}
+        {taskQuery.data ? <TaskProblemLinks task={taskQuery.data} /> : null}
 
         <div>
           <label className="block text-xs font-semibold text-slate-400 mb-1.5 flex items-center gap-1">

@@ -43,6 +43,16 @@ public sealed class JiraCommentInboxRepository : IJiraCommentInboxRepository
             "SELECT COUNT(*) FROM JiraCommentInbox WHERE SeenAt IS NULL");
     }
 
+    public async Task<(int NewTasks, int Comments)> CountUnreadByKindAsync()
+    {
+        using var connection = _factory.Create();
+        var newTasks = await connection.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM JiraCommentInbox WHERE SeenAt IS NULL AND CommentId LIKE 'new-task:%'");
+        var comments = await connection.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM JiraCommentInbox WHERE SeenAt IS NULL AND CommentId NOT LIKE 'new-task:%'");
+        return (newTasks, comments);
+    }
+
     public async Task<bool> InsertIfNewAsync(JiraCommentInboxEntry entry)
     {
         const string sql = """
@@ -55,6 +65,44 @@ public sealed class JiraCommentInboxRepository : IJiraCommentInboxRepository
         using var connection = _factory.Create();
         var changes = await connection.ExecuteScalarAsync<int>(sql, entry);
         return changes > 0;
+    }
+
+    public async Task SeedRecentNewTasksAsync(string sinceIso, string startOfTodayIso, string receivedAt)
+    {
+        const string sql = """
+            INSERT OR IGNORE INTO JiraCommentInbox
+                (TaskId, JiraKey, CommentId, AuthorName, Body, CreatedAt, SeenAt, ReceivedAt)
+            SELECT
+                t.Id,
+                j.JiraKey,
+                'new-task:' || j.JiraKey,
+                'جیرا',
+                'تسک جدید ثبت شد',
+                t.CreatedAt,
+                NULL,
+                @ReceivedAt
+            FROM Task t
+            JOIN TaskJira j ON j.TaskId = t.Id
+            WHERE t.DeletedAt IS NULL
+              AND t.Status != 'Done'
+              AND j.JiraKey LIKE 'PS-%'
+              AND j.OpenCount <= 1
+              AND t.CreatedAt >= @Since
+              AND (
+                t.CreatedAt >= @StartOfToday
+                OR NOT EXISTS (
+                    SELECT 1 FROM WorkLogEntry w
+                    WHERE w.TaskId = t.Id AND w.DeletedAt IS NULL
+                )
+              )
+            """;
+        using var connection = _factory.Create();
+        await connection.ExecuteAsync(sql, new
+        {
+            Since = sinceIso,
+            StartOfToday = startOfTodayIso,
+            ReceivedAt = receivedAt
+        });
     }
 
     public async Task MarkReadAsync(int id, string seenAt)
@@ -71,5 +119,20 @@ public sealed class JiraCommentInboxRepository : IJiraCommentInboxRepository
         await connection.ExecuteAsync(
             "UPDATE JiraCommentInbox SET SeenAt = @SeenAt WHERE TaskId = @TaskId AND SeenAt IS NULL",
             new { TaskId = taskId, SeenAt = seenAt });
+    }
+
+    public async Task MarkReadByJiraKeyAsync(string jiraKey, string seenAt)
+    {
+        var key = (jiraKey ?? string.Empty).Trim().ToUpperInvariant();
+        if (key.Length == 0) return;
+        using var connection = _factory.Create();
+        await connection.ExecuteAsync(
+            """
+            UPDATE JiraCommentInbox
+            SET SeenAt = @SeenAt
+            WHERE SeenAt IS NULL
+              AND (upper(JiraKey) = @JiraKey OR CommentId = 'new-task:' || @JiraKey)
+            """,
+            new { JiraKey = key, SeenAt = seenAt });
     }
 }

@@ -10,24 +10,31 @@ public sealed class TaskService : ITaskService
     private readonly ITaskRepository _tasks;
     private readonly ITaskJiraRepository _jira;
     private readonly ITaskChecklistService _checklist;
+    private readonly IJiraCommentInboxService _inbox;
+    private readonly IProblemRepository _problems;
+    private readonly IServiceScopeFactory _scopes;
     private readonly int _agingDays;
     private readonly double _similarityThreshold;
 
-    public TaskService(ITaskRepository tasks, ITaskJiraRepository jira, ITaskChecklistService checklist, IConfiguration configuration)
+    public TaskService(ITaskRepository tasks, ITaskJiraRepository jira, ITaskChecklistService checklist, IJiraCommentInboxService inbox, IProblemRepository problems, IServiceScopeFactory scopes, IConfiguration configuration)
     {
         _tasks = tasks;
         _jira = jira;
         _checklist = checklist;
+        _inbox = inbox;
+        _problems = problems;
+        _scopes = scopes;
         _agingDays = configuration.GetValue("TaskOS:AgingDays", 3);
         _similarityThreshold = configuration.GetValue("TaskOS:SimilarityThreshold", 0.6);
     }
 
-    public async Task<IReadOnlyList<TaskDto>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null)
+    public async Task<IReadOnlyList<TaskDto>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null, bool includeDone = false)
     {
-        var rows = await _tasks.ListAsync(status, energyType, tag, date, q);
+        var rows = await _tasks.ListAsync(status, energyType, tag, date, q, includeDone);
         var dtos = rows.Select(r => TaskMapping.ToDto(r, _agingDays)).ToList();
         await _checklist.AttachCountsAsync(dtos);
         await AttachJiraAsync(dtos);
+        await AttachProblemsAsync(dtos);
         return dtos;
     }
 
@@ -65,7 +72,7 @@ public sealed class TaskService : ITaskService
             Status = TaskStatuses.Open,
             EnergyType = energy,
             Tags = TaskMapping.JoinTags(request.Tags, request.TagList),
-            Ownership = TaskOwnerships.Mine,
+            Ownership = TaskOwnerships.Normalize(request.Ownership),
             CreatedAt = now,
             UpdatedAt = now
         });
@@ -99,11 +106,41 @@ public sealed class TaskService : ITaskService
             throw new ArgumentException("EnergyType must be Deep or Light.");
         }
 
+        var becomingDone = request.Status.Equals(TaskStatuses.Done, StringComparison.OrdinalIgnoreCase)
+            && !existing.Status.Equals(TaskStatuses.Done, StringComparison.OrdinalIgnoreCase);
+        if (becomingDone)
+        {
+            using var scope = _scopes.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IFocusService>().FlushElapsedForTaskAsync(id);
+        }
+
         ApplyStatus(existing, request.Status, existing.StuckReason);
         existing.Title = title;
         existing.EnergyType = request.EnergyType;
         existing.Tags = TaskMapping.JoinTags(request.Tags, request.TagList);
         existing.Ownership = TaskOwnerships.Normalize(request.Ownership ?? existing.Ownership);
+        if (string.Equals(existing.Ownership, TaskOwnerships.Other, StringComparison.OrdinalIgnoreCase))
+        {
+            existing.Pinned = 0;
+        }
+        existing.UpdatedAt = TaskMapping.Now();
+        await _tasks.UpdateAsync(existing);
+        if (becomingDone)
+        {
+            await _inbox.MarkReadByTaskAsync(id);
+        }
+        return await WithExtrasAsync(TaskMapping.ToDto(existing, _agingDays));
+    }
+
+    public async Task<TaskDto?> SetPinnedAsync(int id, bool pinned)
+    {
+        var existing = await _tasks.GetByIdAsync(id);
+        if (existing is null)
+        {
+            return null;
+        }
+
+        existing.Pinned = pinned ? 1 : 0;
         existing.UpdatedAt = TaskMapping.Now();
         await _tasks.UpdateAsync(existing);
         return await WithExtrasAsync(TaskMapping.ToDto(existing, _agingDays));
@@ -148,7 +185,36 @@ public sealed class TaskService : ITaskService
             throw new ArgumentException("Invalid stuckReason.");
         }
 
+        if (status.Equals(TaskStatuses.Done, StringComparison.OrdinalIgnoreCase)
+            && !existing.Status.Equals(TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
+        {
+            using var scope = _scopes.CreateScope();
+            await scope.ServiceProvider.GetRequiredService<IFocusService>().FlushElapsedForTaskAsync(id);
+        }
+
         ApplyStatus(existing, status, reason);
+        existing.UpdatedAt = TaskMapping.Now();
+        await _tasks.UpdateAsync(existing);
+        if (status.Equals(TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
+        {
+            await _inbox.MarkReadByTaskAsync(id);
+        }
+        return await WithExtrasAsync(TaskMapping.ToDto(existing, _agingDays));
+    }
+
+    public async Task<TaskDto?> SetOwnershipAsync(int id, string ownership)
+    {
+        var existing = await _tasks.GetByIdAsync(id);
+        if (existing is null)
+        {
+            return null;
+        }
+
+        existing.Ownership = TaskOwnerships.Normalize(ownership);
+        if (string.Equals(existing.Ownership, TaskOwnerships.Other, StringComparison.OrdinalIgnoreCase))
+        {
+            existing.Pinned = 0;
+        }
         existing.UpdatedAt = TaskMapping.Now();
         await _tasks.UpdateAsync(existing);
         return await WithExtrasAsync(TaskMapping.ToDto(existing, _agingDays));
@@ -240,6 +306,7 @@ public sealed class TaskService : ITaskService
     {
         await _checklist.AttachCountsAsync([dto]);
         await AttachJiraAsync([dto]);
+        await AttachProblemsAsync([dto]);
         return dto;
     }
 
@@ -254,6 +321,25 @@ public sealed class TaskService : ITaskService
             dto.JiraKey = link.JiraKey;
             dto.JiraUrl = link.JiraUrl;
             dto.JiraDescription = link.Description;
+            dto.AssigneeName = link.AssigneeName;
+            dto.AssigneeDisplay = link.AssigneeDisplay;
+        }
+    }
+
+    private async Task AttachProblemsAsync(IReadOnlyList<TaskDto> dtos)
+    {
+        if (dtos.Count == 0) return;
+        var links = await _problems.ListLinksByTaskIdsAsync(dtos.Select(item => item.Id).ToArray());
+        var byTask = links.GroupBy(item => item.TaskId).ToDictionary(group => group.Key, group => group.ToList());
+        foreach (var dto in dtos)
+        {
+            if (!byTask.TryGetValue(dto.Id, out var rows)) continue;
+            dto.Problems = rows.Select(row => new ProblemLinkDto
+            {
+                Id = row.ProblemId,
+                Title = row.ProblemTitle,
+                Status = ProblemStatuses.Normalize(row.ProblemStatus)
+            }).ToList();
         }
     }
 

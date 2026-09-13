@@ -8,7 +8,7 @@
 |---|---|---|
 | `/` کارهای امروز | `frontend/src/pages/DashboardPage.tsx` | هدر روز، تفکیک Deep/Light، فیلتر وضعیت، افزودن سریع، نمای استاندارد / زن، rollover پایان روز |
 | `/tasks/:id` جزئیات کار | `frontend/src/pages/TaskDetailPage.tsx` | ویرایش عنوان/وضعیت/انرژی، **چک‌لیست مراحل**، Work Logهای مرتبط، تایم‌لاین |
-| `/work` ثبت کار و زمان | `frontend/src/pages/WorkLogPage.tsx` | خلاصه روز، گروه‌بندی fuzzy، کپی برای Jira |
+| `/reports` گزارش | `frontend/src/pages/ReportsPage.tsx` | زمان امروز روی تسک‌ها و پراکندگی پرش |
 | `/problems` استودیوی مسئله | `frontend/src/pages/ProblemsPage.tsx` | لیست مسئله‌ها و وضعیت Exploring/Chosen/Validated |
 | `/problems/:id` استودیو | `frontend/src/pages/ProblemStudioPage.tsx` | گزینه‌ها، قید برعکس، توضیح جونیور، پیش‌مرگ، انتخاب و تست |
 | `/daily` دفترچه یادگیری | `frontend/src/pages/DailyLogPage.tsx` | یادداشت پایان روز و کارهای همان روز |

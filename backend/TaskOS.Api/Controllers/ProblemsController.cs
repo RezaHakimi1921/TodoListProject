@@ -143,4 +143,74 @@ public sealed class ProblemsController : ControllerBase
             return BadRequest(new { error = ex.Message });
         }
     }
+
+    [HttpPost("{id:int}/actions")]
+    public async Task<ActionResult<ProblemDto>> AddAction(int id, [FromBody] UpsertProblemActionRequest request)
+    {
+        try
+        {
+            var updated = await _problems.AddActionAsync(id, request ?? new UpsertProblemActionRequest());
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPut("{id:int}/actions/{actionId:int}")]
+    public async Task<ActionResult<ProblemDto>> UpdateAction(int id, int actionId, [FromBody] UpsertProblemActionRequest request)
+    {
+        try
+        {
+            var updated = await _problems.UpdateActionAsync(id, actionId, request ?? new UpsertProblemActionRequest());
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpDelete("{id:int}/actions/{actionId:int}")]
+    public async Task<ActionResult<ProblemDto>> DeleteAction(int id, int actionId)
+    {
+        var updated = await _problems.DeleteActionAsync(id, actionId);
+        return updated is null ? NotFound() : Ok(updated);
+    }
+
+    [HttpGet("{id:int}/tasks")]
+    public async Task<ActionResult<ProblemDto>> ListTasks(int id)
+    {
+        var problem = await _problems.GetAsync(id);
+        return problem is null ? NotFound() : Ok(problem);
+    }
+
+    [HttpPost("{id:int}/tasks")]
+    public async Task<ActionResult<ProblemDto>> AttachTask(int id, [FromBody] AttachTaskRequest request)
+    {
+        try
+        {
+            var ids = new List<int>();
+            if (request?.TaskId > 0) ids.Add(request.TaskId);
+            if (request?.TaskIds is { Count: > 0 } extra) ids.AddRange(extra);
+            var updated = await _problems.AttachTasksAsync(id, ids);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpDelete("{id:int}/tasks/{taskId:int}")]
+    public async Task<ActionResult<ProblemDto>> DetachTask(int id, int taskId)
+    {
+        var updated = await _problems.DetachTaskAsync(id, taskId);
+        return updated is null ? NotFound() : Ok(updated);
+    }
+
+    [HttpGet("by-task/{taskId:int}")]
+    public async Task<ActionResult<IReadOnlyList<ProblemLinkDto>>> ListByTask(int taskId) =>
+        Ok(await _problems.ListByTaskAsync(taskId));
 }

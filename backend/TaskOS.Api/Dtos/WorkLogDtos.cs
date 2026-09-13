@@ -10,6 +10,9 @@ public sealed class WorkLogDto
     public int? ProblemId { get; set; }
     public string CreatedAt { get; set; } = string.Empty;
     public string? JiraWorklogId { get; set; }
+    public string? TaskTitle { get; set; }
+    public string? JiraKey { get; set; }
+    public string? ProblemTitle { get; set; }
 }
 
 public sealed class CaptureWorkLogRequest
@@ -40,4 +43,9 @@ public sealed class EntityWorkLogDto
 {
     public int TotalMinutes { get; set; }
     public IReadOnlyList<WorkLogDto> Entries { get; set; } = [];
+}
+
+public sealed class UpdateWorkLogRequest
+{
+    public string Description { get; set; } = string.Empty;
 }

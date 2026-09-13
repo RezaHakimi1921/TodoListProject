@@ -2,7 +2,7 @@ export type TaskStatus = 'Open' | 'Doing' | 'Stuck' | 'Done'
 export type EnergyType = 'Deep' | 'Light'
 export type TaskOwnership = 'Mine' | 'Other'
 export type WorkLogSource = 'Timer' | 'Extension' | 'Manual' | 'Break' | 'Auto'
-export type ProblemStatus = 'Exploring' | 'Chosen' | 'Validated'
+export type ProblemStatus = 'Open' | 'Monitoring' | 'Resolved'
 
 export const STUCK_REASONS = [
   'منتظر کسی‌ام',
@@ -46,6 +46,10 @@ export interface TaskItem {
   jiraKey?: string | null
   jiraUrl?: string | null
   ownership?: TaskOwnership
+  assigneeName?: string | null
+  assigneeDisplay?: string | null
+  pinned?: boolean
+  problems?: ProblemLink[]
 }
 
 export interface TimelineEntry {
@@ -78,6 +82,9 @@ export interface WorkLogEntry {
   problemId?: number | null
   createdAt: string
   jiraWorklogId?: string | null
+  taskTitle?: string | null
+  jiraKey?: string | null
+  problemTitle?: string | null
 }
 
 export interface WorkLogGroup {
@@ -101,17 +108,68 @@ export interface ProblemOption {
   isChosen: boolean
 }
 
+export interface ProblemLink {
+  id: number
+  title: string
+  status: ProblemStatus
+}
+
+export interface ProblemTaskLink {
+  id: number
+  title: string
+  status: string
+  jiraKey?: string | null
+  jiraUrl?: string | null
+}
+
+export interface ProblemActionItem {
+  id: number
+  title: string
+  owner: string | null
+  deadline: string | null
+  status: 'Open' | 'Done'
+}
+
 export interface Problem {
   id: number
   title: string
   status: ProblemStatus
-  noTimeNote: string | null
-  infiniteTimeNote: string | null
-  chosenOptionId: number | null
-  premortemSign: string | null
-  options: ProblemOption[]
-  canChoose: boolean
-  blocker: string | null
+  expectedBehavior?: string | null
+  actualBehavior?: string | null
+  rootCause?: string | null
+  detectionGap?: string | null
+  affectedPopulation?: string | null
+  resolution?: string | null
+  recovery?: string | null
+  validationNote?: string | null
+  prevention?: string | null
+  impactBranches?: string | null
+  impactCustomers?: string | null
+  impactRecords?: string | null
+  impactServices?: string | null
+  impactSupport?: string | null
+  impactBusiness?: string | null
+  startedAt?: string | null
+  firstAffectedAt?: string | null
+  detectedAt?: string | null
+  rootCauseFoundAt?: string | null
+  fixedAt?: string | null
+  recoveryCompletedAt?: string | null
+  costTechnical?: string | null
+  costOperational?: string | null
+  costBusiness?: string | null
+  costOpportunity?: string | null
+  sectionSavedAt?: Record<string, string> | null
+  taskCount?: number
+  tasks?: ProblemTaskLink[]
+  actions?: ProblemActionItem[]
+  noTimeNote?: string | null
+  infiniteTimeNote?: string | null
+  chosenOptionId?: number | null
+  premortemSign?: string | null
+  options?: ProblemOption[]
+  canChoose?: boolean
+  blocker?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -128,18 +186,28 @@ export function statusLabel(task: { status: TaskStatus; stuckReason?: string | n
   return STATUS_LABEL[task.status]
 }
 
-export const PROBLEM_STATUS_LABEL: Record<ProblemStatus, string> = {
-  Exploring: 'در حال کشف و بررسی گزینه‌ها',
-  Chosen: 'راهکار انتخاب شده (پیش از تست)',
-  Validated: 'تست شده و تثبیت‌شده',
+export function ownerLabel(task: {
+  ownership?: TaskOwnership
+  assigneeDisplay?: string | null
+  assigneeName?: string | null
+}) {
+  if (task.ownership !== 'Other') return 'من'
+  const name = (task.assigneeDisplay || task.assigneeName || '').trim()
+  return name || 'دیگری'
 }
 
-export const SPARK_QUESTIONS = [
-  'اگر فردا باید به یک همکار تازه‌کار (Junior) توضیح دهی، کدام مسیر ساده‌تر و شفاف‌تر است؟',
-  'اگر برای حل این مسئله فقط ۱ ساعت زمان داشتی، کدام کارها را بی‌درنگ حذف می‌کردی؟',
-  'اگر محدودیت‌ها برعکس می‌شد (مثلاً بدون دسترسی به دیتابیس یا بدون بودجه)، چه می‌کردی؟',
-  'کدام بخش این راه‌حل را می‌توانی بدون آسیب زدن به هدف اصلی حذف کنی؟',
-  'اگر یک هفته بعد این انتخاب شکست بخورد، چه نشانه‌ای زودتر از همه آن را هشدار می‌داد؟',
+export const PROBLEM_STATUS_LABEL: Record<ProblemStatus, string> = {
+  Open: 'در حال بررسی',
+  Monitoring: 'مراقب تکرار',
+  Resolved: 'بسته شد',
+}
+
+export const GOLD_QUESTIONS = [
+  'از کی شروع شده؟',
+  'چرا اتفاق افتاده؟',
+  'غیر از این مورد، چه چیزهای دیگری تحت تأثیر قرار گرفته‌اند؟',
+  'چطور مطمئن شوم همه موارد قبلی اصلاح شده‌اند؟',
+  'چه چیزی باید تغییر کند که دفعه بعد خودمان زودتر بفهمیم؟',
 ]
 
 export function isAutomaticWorkLog(source: string | null | undefined) {

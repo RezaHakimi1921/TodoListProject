@@ -11,13 +11,16 @@ import {
   CheckCircle2,
   AlertTriangle
 } from 'lucide-react'
-import { deleteTask, updateTask, updateTaskStatus } from '../api/tasks'
+import { finishFocus, getFocus } from '../api/focus'
+import { deleteTask, setTaskPinned, updateTask, updateTaskStatus } from '../api/tasks'
 import { useTrashConfirm } from './ConfirmProvider'
 import { EntityWorkLogs } from './EntityWorkLogs'
 import { TaskChecklist } from './TaskChecklist'
 import { TaskCommentThread } from './TaskCommentThread'
 import { TagChipsEditor } from './TagChips'
 import { TaskOwnershipToggle } from './TaskOwnershipToggle'
+import { TaskProblemLinks } from './TaskProblemLinks'
+import { onFocusedTaskDone } from '../lib/resumePreviousFocus'
 import { STUCK_REASONS, type EnergyType, type TaskItem, type TaskOwnership, type TaskStatus } from '../types'
 
 interface Props {
@@ -73,23 +76,40 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
       }),
     onSuccess: (updated) => {
       setStatus(updated.status)
+      if (updated.status === 'Done') {
+        const cached = queryClient.getQueryData<TaskItem[]>(['tasks'])
+        void onFocusedTaskDone(task!.id, cached).then(() => {
+          void queryClient.invalidateQueries({ queryKey: ['focus'] })
+          void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+        })
+      }
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
     },
     onError: (err: Error) => setError(err.message),
   })
 
   const ownershipMutation = useMutation({
-    mutationFn: (next: TaskOwnership) =>
-      updateTask(task!.id, {
+    mutationFn: async (next: TaskOwnership) => {
+      const updated = await updateTask(task!.id, {
         title: title.trim() || task!.title,
         status,
         energyType,
         tags,
         ownership: next,
-      }),
+      })
+      if (next === 'Other') {
+        await setTaskPinned(task!.id, false).catch(() => undefined)
+        const focus = await getFocus().catch(() => null)
+        if (focus?.taskId === task!.id) {
+          await finishFocus({ markTaskDone: false }).catch(() => undefined)
+        }
+      }
+      return updated
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
       void queryClient.invalidateQueries({ queryKey: ['task', task?.id] })
+      void queryClient.invalidateQueries({ queryKey: ['focus'] })
     },
     onError: (err: Error) => setError(err.message),
   })
@@ -120,7 +140,7 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
       dir="rtl"
     >
       <div
-        className="w-full max-w-xl h-full bg-[#111520] border-r border-[#262f44] p-6 shadow-2xl flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-300"
+        className="w-full max-w-full sm:max-w-xl h-full bg-[#111520] border-r border-[#262f44] p-4 sm:p-6 shadow-2xl flex flex-col justify-between overflow-y-auto animate-in slide-in-from-right duration-300"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -174,9 +194,15 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
                       const reason = stuckReason || 'سخته'
                       setStuckReason(reason)
                       void updateTaskStatus(task.id, { status: 'Stuck', stuckReason: reason })
-                        .then((updated) => {
+                        .then(async (updated) => {
                           setStatus(updated.status)
+                          const focus = await getFocus().catch(() => null)
+                          if (focus?.taskId === task.id) {
+                            await finishFocus({ markTaskDone: false }).catch(() => undefined)
+                            void queryClient.invalidateQueries({ queryKey: ['focus'] })
+                          }
                           void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+                          void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
                         })
                         .catch((err: Error) => setError(err.message))
                       return
@@ -225,6 +251,7 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
 
             <TaskOwnershipToggle
               value={ownership}
+              otherLabel={task.assigneeDisplay || task.assigneeName || undefined}
               disabled={ownershipMutation.isPending}
               onChange={(next) => {
                 setOwnership(next)
@@ -242,8 +269,10 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
                 <select
                   value={stuckReason}
                   onChange={(e) => {
-                    setStuckReason(e.target.value)
-                    updateTaskStatus(task.id, { status: 'Stuck', stuckReason: e.target.value })
+                    const reason = e.target.value
+                    setStuckReason(reason)
+                    if (!reason) return
+                    void updateTaskStatus(task.id, { status: 'Stuck', stuckReason: reason })
                   }}
                   className="w-full rounded-lg bg-[#0b0e16] border border-rose-500/40 px-3 py-1.5 text-xs text-rose-200 focus:outline-none"
                 >
@@ -256,6 +285,7 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
                 </select>
               </div>
             )}
+            <TaskProblemLinks task={task} />
 
             {/* Tags */}
             <div>
@@ -278,7 +308,7 @@ export function TaskEditorDrawer({ task, onClose }: Props) {
         {error && <p className="mt-4 text-xs text-rose-300">{error}</p>}
 
         {/* Footer Actions */}
-        <div className="mt-6 pt-4 border-t border-slate-800/80 flex items-center justify-between">
+        <div className="mt-6 pt-4 border-t border-slate-800/80 flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
           <button
             type="button"
             onClick={handleDeleteTask}

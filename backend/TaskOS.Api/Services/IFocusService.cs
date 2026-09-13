@@ -9,7 +9,9 @@ public interface IFocusService
     Task<WorkFocusDto> TickAsync(FocusActionRequest request);
     Task<WorkFocusDto> FinishAsync(FocusActionRequest request);
     Task<WorkFocusDto> ClearAsync();
-    Task<WorkFocusDto> StartRestAsync(string? description = null);
-    Task<WorkFocusDto> EndRestAsync();
+    Task<WorkFocusDto> StartRestAsync(string? description = null, int? activityTaskId = null, string? note = null);
+    Task<WorkFocusDto> SaveRestNoteAsync(string? note);
+    Task<WorkFocusDto> EndRestAsync(string? note = null);
     Task FlushElapsedSliceAsync();
+    Task FlushElapsedForTaskAsync(int taskId);
 }

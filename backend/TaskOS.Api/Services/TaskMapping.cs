@@ -35,16 +35,31 @@ internal static class TaskMapping
 
     public static string Now() => DateTime.UtcNow.ToString("o");
 
-    public static string TodayLocal()
+    public static string TodayLocal() => ToIranTime(DateTime.UtcNow).ToString("yyyy-MM-dd");
+
+    public static bool StartedOnPriorLocalDay(DateTime started)
     {
+        var startedUtc = started.Kind == DateTimeKind.Unspecified
+            ? DateTime.SpecifyKind(started, DateTimeKind.Utc)
+            : started.ToUniversalTime();
+        return ToIranTime(startedUtc).Date < ToIranTime(DateTime.UtcNow).Date;
+    }
+
+    private static DateTime ToIranTime(DateTime utc)
+    {
+        var value = utc.Kind == DateTimeKind.Utc ? utc : DateTime.SpecifyKind(utc, DateTimeKind.Utc);
         try
         {
             var zone = TimeZoneInfo.FindSystemTimeZoneById("Iran Standard Time");
-            return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, zone).ToString("yyyy-MM-dd");
+            return TimeZoneInfo.ConvertTimeFromUtc(value, zone);
         }
         catch (TimeZoneNotFoundException)
         {
-            return DateTime.UtcNow.AddHours(3.5).ToString("yyyy-MM-dd");
+            return value.AddHours(3.5);
+        }
+        catch (InvalidTimeZoneException)
+        {
+            return value.AddHours(3.5);
         }
     }
 
@@ -65,7 +80,8 @@ internal static class TaskMapping
             CreatedAt = record.CreatedAt,
             UpdatedAt = record.UpdatedAt,
             DoneAt = record.DoneAt,
-            Ownership = TaskOwnerships.Normalize(record.Ownership)
+            Ownership = TaskOwnerships.Normalize(record.Ownership),
+            Pinned = record.Pinned != 0
         };
     }
 

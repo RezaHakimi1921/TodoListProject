@@ -7,13 +7,13 @@ namespace TaskOS.Api.Services;
 public sealed class ProblemService : IProblemService
 {
     private readonly IProblemRepository _problems;
-    private readonly IWorkLogService _workLogs;
+    private readonly ITaskRepository _tasks;
     private readonly ITrashService _trash;
 
-    public ProblemService(IProblemRepository problems, IWorkLogService workLogs, ITrashService trash)
+    public ProblemService(IProblemRepository problems, ITaskRepository tasks, ITrashService trash)
     {
         _problems = problems;
-        _workLogs = workLogs;
+        _tasks = tasks;
         _trash = trash;
     }
 
@@ -23,7 +23,7 @@ public sealed class ProblemService : IProblemService
         var result = new List<ProblemDto>();
         foreach (var row in rows)
         {
-            result.Add(await MapAsync(row));
+            result.Add(await MapAsync(row, includeTasks: false));
         }
 
         return result;
@@ -32,7 +32,7 @@ public sealed class ProblemService : IProblemService
     public async Task<ProblemDto?> GetAsync(int id)
     {
         var row = await _problems.GetAsync(id);
-        return row is null ? null : await MapAsync(row);
+        return row is null ? null : await MapAsync(row, includeTasks: true);
     }
 
     public async Task<ProblemDto> CreateAsync(CreateProblemRequest request)
@@ -42,10 +42,15 @@ public sealed class ProblemService : IProblemService
         var id = await _problems.CreateAsync(new ProblemRecord
         {
             Title = title,
-            Status = ProblemStatuses.Exploring,
+            Status = ProblemStatuses.Open,
             CreatedAt = now,
             UpdatedAt = now
         });
+        if (request.TaskId is int taskId)
+        {
+            await AttachTaskAsync(id, taskId);
+        }
+
         return (await GetAsync(id))!;
     }
 
@@ -54,11 +59,45 @@ public sealed class ProblemService : IProblemService
         var row = await _problems.GetAsync(id);
         if (row is null) return null;
         row.Title = Require(request.Title, "Title is required.");
+        if (!string.IsNullOrWhiteSpace(request.Status))
+        {
+            row.Status = ProblemStatuses.Normalize(request.Status);
+        }
+        row.ExpectedBehavior = EmptyToNull(request.ExpectedBehavior);
+        row.ActualBehavior = EmptyToNull(request.ActualBehavior);
+        row.RootCause = EmptyToNull(request.RootCause);
+        row.DetectionGap = EmptyToNull(request.DetectionGap);
+        row.AffectedPopulation = EmptyToNull(request.AffectedPopulation);
+        row.Resolution = EmptyToNull(request.Resolution);
+        row.Recovery = EmptyToNull(request.Recovery);
+        row.ValidationNote = EmptyToNull(request.ValidationNote);
+        row.Prevention = EmptyToNull(request.Prevention);
+        row.ImpactBranches = EmptyToNull(request.ImpactBranches);
+        row.ImpactCustomers = EmptyToNull(request.ImpactCustomers);
+        row.ImpactRecords = EmptyToNull(request.ImpactRecords);
+        row.ImpactServices = EmptyToNull(request.ImpactServices);
+        row.ImpactSupport = EmptyToNull(request.ImpactSupport);
+        row.ImpactBusiness = EmptyToNull(request.ImpactBusiness);
+        row.StartedAt = EmptyToNull(request.StartedAt);
+        row.FirstAffectedAt = EmptyToNull(request.FirstAffectedAt);
+        row.DetectedAt = EmptyToNull(request.DetectedAt);
+        row.RootCauseFoundAt = EmptyToNull(request.RootCauseFoundAt);
+        row.FixedAt = EmptyToNull(request.FixedAt);
+        row.RecoveryCompletedAt = EmptyToNull(request.RecoveryCompletedAt);
+        row.CostTechnical = EmptyToNull(request.CostTechnical);
+        row.CostOperational = EmptyToNull(request.CostOperational);
+        row.CostBusiness = EmptyToNull(request.CostBusiness);
+        row.CostOpportunity = EmptyToNull(request.CostOpportunity);
+        row.SectionSavedAt = EmptyToNull(request.SectionSavedAt);
         row.NoTimeNote = EmptyToNull(request.NoTimeNote);
         row.InfiniteTimeNote = EmptyToNull(request.InfiniteTimeNote);
         row.UpdatedAt = TaskMapping.Now();
         await _problems.UpdateAsync(row);
-        return await MapAsync(row);
+        if (request.AttachTaskIds is { Count: > 0 } attachIds)
+        {
+            return await AttachTasksAsync(id, attachIds);
+        }
+        return await GetAsync(id);
     }
 
     public async Task<ProblemDto?> AddOptionAsync(int id, UpsertOptionRequest request)
@@ -104,29 +143,14 @@ public sealed class ProblemService : IProblemService
         var row = await _problems.GetAsync(id);
         if (row is null) return null;
         var options = await _problems.ListOptionsAsync(id);
-        var blocker = GetBlocker(options);
-        if (blocker is not null)
-        {
-            throw new ArgumentException(blocker);
-        }
-
         var chosen = options.FirstOrDefault(item => item.Id == request.OptionId)
                      ?? throw new ArgumentException("Option not found.");
         var sign = Require(request.PremortemSign, "Premortem sign is required before choosing.");
-
         row.ChosenOptionId = chosen.Id;
         row.PremortemSign = sign;
-        row.Status = ProblemStatuses.Chosen;
+        row.Status = ProblemStatuses.Monitoring;
         row.UpdatedAt = TaskMapping.Now();
         await _problems.UpdateAsync(row);
-
-        await _workLogs.CaptureAsync(new CaptureWorkLogRequest
-        {
-            Description = $"مسئله: {row.Title} | انتخاب: {chosen.Title} | هنوز تست نشده",
-            DurationMinutes = 15,
-            Source = WorkLogSources.Manual
-        });
-
         return await GetAsync(id);
     }
 
@@ -134,36 +158,149 @@ public sealed class ProblemService : IProblemService
     {
         var row = await _problems.GetAsync(id);
         if (row is null) return null;
-        if (row.Status != ProblemStatuses.Chosen || row.ChosenOptionId is null)
+        row.Status = ProblemStatuses.Resolved;
+        if (!string.IsNullOrWhiteSpace(request.Note))
         {
-            throw new ArgumentException("Validate only after an option is chosen.");
+            row.ValidationNote = request.Note.Trim();
         }
-
-        var chosen = await _problems.GetOptionAsync(id, row.ChosenOptionId.Value);
-        row.Status = ProblemStatuses.Validated;
         row.UpdatedAt = TaskMapping.Now();
         await _problems.UpdateAsync(row);
-
-        var note = string.IsNullOrWhiteSpace(request.Note) ? "تست کردم، جواب داد" : request.Note.Trim();
-        await _workLogs.CaptureAsync(new CaptureWorkLogRequest
-        {
-            Description = $"مسئله: {row.Title} | تست شد: {chosen?.Title} | {note}",
-            DurationMinutes = 15,
-            Source = WorkLogSources.Manual
-        });
-
         return await GetAsync(id);
     }
 
-    private async Task<ProblemDto> MapAsync(ProblemRecord row)
+    public async Task<ProblemDto?> AddActionAsync(int id, UpsertProblemActionRequest request)
+    {
+        if (await _problems.GetAsync(id) is null) return null;
+        var now = TaskMapping.Now();
+        await _problems.AddActionAsync(new ProblemActionRecord
+        {
+            ProblemId = id,
+            Title = Require(request.Title, "Action title is required."),
+            Owner = EmptyToNull(request.Owner),
+            Deadline = EmptyToNull(request.Deadline),
+            Status = string.Equals(request.Status, ProblemActionStatuses.Done, StringComparison.OrdinalIgnoreCase)
+                ? ProblemActionStatuses.Done
+                : ProblemActionStatuses.Open,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+        return await GetAsync(id);
+    }
+
+    public async Task<ProblemDto?> UpdateActionAsync(int id, int actionId, UpsertProblemActionRequest request)
+    {
+        var action = await _problems.GetActionAsync(id, actionId);
+        if (action is null) return null;
+        action.Title = Require(request.Title, "Action title is required.");
+        action.Owner = EmptyToNull(request.Owner);
+        action.Deadline = EmptyToNull(request.Deadline);
+        action.Status = string.Equals(request.Status, ProblemActionStatuses.Done, StringComparison.OrdinalIgnoreCase)
+            ? ProblemActionStatuses.Done
+            : ProblemActionStatuses.Open;
+        action.UpdatedAt = TaskMapping.Now();
+        await _problems.UpdateActionAsync(action);
+        return await GetAsync(id);
+    }
+
+    public async Task<ProblemDto?> DeleteActionAsync(int id, int actionId)
+    {
+        if (await _problems.GetAsync(id) is null) return null;
+        await _problems.DeleteActionAsync(id, actionId);
+        return await GetAsync(id);
+    }
+
+    public async Task<ProblemDto?> AttachTaskAsync(int id, int taskId) =>
+        await AttachTasksAsync(id, [taskId]);
+
+    public async Task<ProblemDto?> AttachTasksAsync(int id, IReadOnlyList<int> taskIds)
+    {
+        if (await _problems.GetAsync(id) is null) return null;
+        var ids = taskIds.Where(item => item > 0).Distinct().ToArray();
+        if (ids.Length == 0) throw new ArgumentException("Task not found.");
+        var now = TaskMapping.Now();
+        foreach (var taskId in ids)
+        {
+            var task = await _tasks.GetByIdAsync(taskId);
+            if (task is null) throw new ArgumentException("Task not found.");
+            await _problems.AttachTaskAsync(id, taskId, now);
+        }
+        return await GetAsync(id);
+    }
+
+    public async Task<ProblemDto?> DetachTaskAsync(int id, int taskId)
+    {
+        if (await _problems.GetAsync(id) is null) return null;
+        await _problems.DetachTaskAsync(id, taskId);
+        return await GetAsync(id);
+    }
+
+    public async Task<IReadOnlyList<ProblemLinkDto>> ListByTaskAsync(int taskId)
+    {
+        var rows = await _problems.ListProblemsForTaskAsync(taskId);
+        return rows.Select(row => new ProblemLinkDto
+        {
+            Id = row.ProblemId,
+            Title = row.ProblemTitle,
+            Status = ProblemStatuses.Normalize(row.ProblemStatus)
+        }).ToList();
+    }
+
+    private async Task<ProblemDto> MapAsync(ProblemRecord row, bool includeTasks)
     {
         var options = await _problems.ListOptionsAsync(row.Id);
-        var blocker = GetBlocker(options);
+        var actions = await _problems.ListActionsAsync(row.Id);
+        var taskLinks = includeTasks
+            ? await _problems.ListTasksAsync(row.Id)
+            : [];
+        var taskCount = includeTasks ? taskLinks.Count : await _problems.CountTasksAsync(row.Id);
         return new ProblemDto
         {
             Id = row.Id,
             Title = row.Title,
-            Status = row.Status,
+            Status = ProblemStatuses.Normalize(row.Status),
+            ExpectedBehavior = row.ExpectedBehavior,
+            ActualBehavior = row.ActualBehavior,
+            RootCause = row.RootCause,
+            DetectionGap = row.DetectionGap,
+            AffectedPopulation = row.AffectedPopulation,
+            Resolution = row.Resolution,
+            Recovery = row.Recovery,
+            ValidationNote = row.ValidationNote,
+            Prevention = row.Prevention,
+            ImpactBranches = row.ImpactBranches,
+            ImpactCustomers = row.ImpactCustomers,
+            ImpactRecords = row.ImpactRecords,
+            ImpactServices = row.ImpactServices,
+            ImpactSupport = row.ImpactSupport,
+            ImpactBusiness = row.ImpactBusiness,
+            StartedAt = row.StartedAt,
+            FirstAffectedAt = row.FirstAffectedAt,
+            DetectedAt = row.DetectedAt,
+            RootCauseFoundAt = row.RootCauseFoundAt,
+            FixedAt = row.FixedAt,
+            RecoveryCompletedAt = row.RecoveryCompletedAt,
+            CostTechnical = row.CostTechnical,
+            CostOperational = row.CostOperational,
+            CostBusiness = row.CostBusiness,
+            CostOpportunity = row.CostOpportunity,
+            SectionSavedAt = row.SectionSavedAt,
+            TaskCount = taskCount,
+            Tasks = taskLinks.Select(link => new ProblemTaskDto
+            {
+                Id = link.TaskId,
+                Title = link.TaskTitle,
+                Status = link.TaskStatus,
+                JiraKey = link.JiraKey,
+                JiraUrl = link.JiraUrl
+            }).ToList(),
+            Actions = actions.Select(action => new ProblemActionDto
+            {
+                Id = action.Id,
+                Title = action.Title,
+                Owner = action.Owner,
+                Deadline = action.Deadline,
+                Status = action.Status
+            }).ToList(),
             NoTimeNote = row.NoTimeNote,
             InfiniteTimeNote = row.InfiniteTimeNote,
             ChosenOptionId = row.ChosenOptionId,
@@ -176,27 +313,9 @@ public sealed class ProblemService : IProblemService
                 SortOrder = option.SortOrder,
                 IsChosen = row.ChosenOptionId == option.Id
             }).ToList(),
-            CanChoose = blocker is null,
-            Blocker = blocker,
             CreatedAt = row.CreatedAt,
             UpdatedAt = row.UpdatedAt
         };
-    }
-
-    private static string? GetBlocker(IReadOnlyList<ProblemOptionRecord> options)
-    {
-        var filled = options.Where(item => !string.IsNullOrWhiteSpace(item.Title)).ToList();
-        if (filled.Count < 3)
-        {
-            return "قانون گزینه سوم: تا سه گزینه ننویسی نمی‌توانی انتخاب کنی.";
-        }
-
-        if (filled.Any(item => string.IsNullOrWhiteSpace(item.JuniorExplain)))
-        {
-            return "هر گزینه را در یک جمله برای جونیور بنویس، بعد انتخاب کن.";
-        }
-
-        return null;
     }
 
     private static string Require(string? value, string message)

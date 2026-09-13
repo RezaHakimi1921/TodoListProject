@@ -28,6 +28,10 @@ export function listEntityWorkLogs(kind: 'task' | 'problem', id: number) {
   return api.get<EntityWorkLogList>(`/api/worklogs/by-${kind}/${id}`)
 }
 
+export function updateWorkLog(id: number, description: string) {
+  return api.patch<WorkLogEntry>(`/api/worklogs/${id}`, { description })
+}
+
 export function deleteWorkLog(id: number) {
   return api.delete(`/api/worklogs/${id}`)
 }

@@ -6,6 +6,8 @@ namespace TaskOS.Api.Repositories;
 
 public sealed class TaskRepository : ITaskRepository
 {
+    private const string Columns = "Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, Pinned, CreatedAt, UpdatedAt, DoneAt";
+
     private readonly SqliteConnectionFactory _factory;
 
     public TaskRepository(SqliteConnectionFactory factory)
@@ -13,10 +15,10 @@ public sealed class TaskRepository : ITaskRepository
         _factory = factory;
     }
 
-    public async Task<IReadOnlyList<TaskRecord>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null)
+    public async Task<IReadOnlyList<TaskRecord>> ListAsync(string? status, string? energyType, string? tag, string? date = null, string? q = null, bool includeDone = false)
     {
-        var sql = """
-            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt
+        var sql = $"""
+            SELECT {Columns}
             FROM Task
             WHERE DeletedAt IS NULL
               AND (@Status IS NULL OR Status = @Status)
@@ -38,12 +40,14 @@ public sealed class TaskRepository : ITaskRepository
                       )
                   )
               AND (
-                    @Date IS NULL
+                    @IncludeDone = 1
+                    OR @Date IS NULL
                     OR @Q IS NOT NULL
                     OR Status != 'Done'
                     OR date(DoneAt) = @Date
                   )
             ORDER BY
+                CASE WHEN Pinned != 0 THEN 0 ELSE 1 END,
                 CASE Status WHEN 'Doing' THEN 0 WHEN 'Open' THEN 1 WHEN 'Stuck' THEN 2 ELSE 3 END,
                 UpdatedAt DESC
             """;
@@ -55,15 +59,16 @@ public sealed class TaskRepository : ITaskRepository
             EnergyType = string.IsNullOrWhiteSpace(energyType) ? null : energyType,
             Tag = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim(),
             Date = string.IsNullOrWhiteSpace(date) ? null : date,
-            Q = string.IsNullOrWhiteSpace(q) ? null : q.Trim()
+            Q = string.IsNullOrWhiteSpace(q) ? null : q.Trim(),
+            IncludeDone = includeDone ? 1 : 0
         });
         return rows.ToList();
     }
 
     public async Task<TaskRecord?> GetByIdAsync(int id)
     {
-        const string sql = """
-            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt
+        var sql = $"""
+            SELECT {Columns}
             FROM Task
             WHERE Id = @Id AND DeletedAt IS NULL
             """;
@@ -73,8 +78,8 @@ public sealed class TaskRepository : ITaskRepository
 
     public async Task<IReadOnlyList<TaskRecord>> ListDoneAsync()
     {
-        const string sql = """
-            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt
+        var sql = $"""
+            SELECT {Columns}
             FROM Task
             WHERE Status = 'Done' AND DeletedAt IS NULL
             ORDER BY DoneAt DESC, UpdatedAt DESC
@@ -87,8 +92,8 @@ public sealed class TaskRepository : ITaskRepository
     public async Task<int> CreateAsync(TaskRecord task)
     {
         const string sql = """
-            INSERT INTO Task (Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt)
-            VALUES (@Title, @Status, @EnergyType, @Tags, @StuckReason, @Ownership, @CreatedAt, @UpdatedAt, @DoneAt);
+            INSERT INTO Task (Title, Status, EnergyType, Tags, StuckReason, Ownership, Pinned, CreatedAt, UpdatedAt, DoneAt)
+            VALUES (@Title, @Status, @EnergyType, @Tags, @StuckReason, @Ownership, @Pinned, @CreatedAt, @UpdatedAt, @DoneAt);
             SELECT last_insert_rowid();
             """;
         using var connection = _factory.Create();
@@ -105,6 +110,7 @@ public sealed class TaskRepository : ITaskRepository
                 Tags = @Tags,
                 StuckReason = @StuckReason,
                 Ownership = @Ownership,
+                Pinned = @Pinned,
                 UpdatedAt = @UpdatedAt,
                 DoneAt = @DoneAt
             WHERE Id = @Id AND DeletedAt IS NULL
@@ -155,7 +161,7 @@ public sealed class TaskRepository : ITaskRepository
     public async Task<IReadOnlyList<TaskRecord>> ListRelatedToDateAsync(string logDate)
     {
         const string sql = """
-            SELECT DISTINCT t.Id, t.Title, t.Status, t.EnergyType, t.Tags, t.StuckReason, t.Ownership,
+            SELECT DISTINCT t.Id, t.Title, t.Status, t.EnergyType, t.Tags, t.StuckReason, t.Ownership, t.Pinned,
                    t.CreatedAt, t.UpdatedAt, t.DoneAt
             FROM Task t
             WHERE t.DeletedAt IS NULL
@@ -168,7 +174,7 @@ public sealed class TaskRepository : ITaskRepository
                         WHERE e.TaskId = t.Id AND e.DeletedAt IS NULL AND date(e.CreatedAt) = @LogDate
                    )
               )
-            ORDER BY t.UpdatedAt DESC
+            ORDER BY t.Pinned DESC, t.UpdatedAt DESC
             """;
         using var connection = _factory.Create();
         var rows = await connection.QueryAsync<TaskRecord>(sql, new { LogDate = logDate });
@@ -177,8 +183,8 @@ public sealed class TaskRepository : ITaskRepository
 
     public async Task<TaskRecord?> FindSameTitleOnDayAsync(string title, string day)
     {
-        const string sql = """
-            SELECT Id, Title, Status, EnergyType, Tags, StuckReason, Ownership, CreatedAt, UpdatedAt, DoneAt
+        var sql = $"""
+            SELECT {Columns}
             FROM Task
             WHERE DeletedAt IS NULL
               AND lower(trim(Title)) = lower(trim(@Title))

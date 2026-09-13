@@ -15,15 +15,31 @@ public static class WorkLogClusterer
 
     public static WorkLogSummaryDto Cluster(string date, IReadOnlyList<WorkLogEntry> entries, double threshold)
     {
-        var groups = new List<List<WorkLogEntry>>();
+        var dtoGroups = new List<WorkLogGroupDto>();
 
-        foreach (var entry in entries.OrderBy(e => e.CreatedAt).ThenBy(e => e.Id))
+        foreach (var group in entries.Where(item => item.TaskId is int)
+                     .GroupBy(item => item.TaskId!.Value)
+                     .OrderBy(group => group.Min(item => item.CreatedAt)))
+        {
+            dtoGroups.Add(ToGroup(group.ToList(), LinkedTitle));
+        }
+
+        foreach (var group in entries.Where(item => item.TaskId is null && item.ProblemId is int)
+                     .GroupBy(item => item.ProblemId!.Value)
+                     .OrderBy(group => group.Min(item => item.CreatedAt)))
+        {
+            dtoGroups.Add(ToGroup(group.ToList(), ProblemTitle));
+        }
+
+        var loose = entries.Where(item => item.TaskId is null && item.ProblemId is null).ToList();
+        var clusters = new List<List<WorkLogEntry>>();
+        foreach (var entry in loose.OrderBy(item => item.CreatedAt).ThenBy(item => item.Id))
         {
             var bestIndex = -1;
             var bestScore = 0d;
-            for (var i = 0; i < groups.Count; i++)
+            for (var i = 0; i < clusters.Count; i++)
             {
-                var score = groups[i].Max(existing => WorkScore(entry.Description, existing.Description));
+                var score = clusters[i].Max(existing => WorkScore(entry.Description, existing.Description));
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -33,20 +49,15 @@ public static class WorkLogClusterer
 
             if (bestIndex >= 0 && bestScore >= threshold)
             {
-                groups[bestIndex].Add(entry);
+                clusters[bestIndex].Add(entry);
             }
             else
             {
-                groups.Add([entry]);
+                clusters.Add([entry]);
             }
         }
 
-        var dtoGroups = groups.Select(group => new WorkLogGroupDto
-        {
-            Title = PickTitle(group),
-            TotalMinutes = group.Sum(item => item.DurationMinutes),
-            Entries = group.Select(ToDto).ToList()
-        }).ToList();
+        dtoGroups.AddRange(clusters.Select(group => ToGroup(group, PickTitle)));
 
         var total = dtoGroups.Sum(group => group.TotalMinutes);
         return new WorkLogSummaryDto
@@ -55,6 +66,16 @@ public static class WorkLogClusterer
             TotalMinutes = total,
             Groups = dtoGroups,
             CopyText = BuildCopyText(date, total, dtoGroups)
+        };
+    }
+
+    private static WorkLogGroupDto ToGroup(IReadOnlyList<WorkLogEntry> group, Func<IReadOnlyList<WorkLogEntry>, string> title)
+    {
+        return new WorkLogGroupDto
+        {
+            Title = title(group),
+            TotalMinutes = group.Sum(item => item.DurationMinutes),
+            Entries = group.Select(ToDto).ToList()
         };
     }
 
@@ -91,6 +112,25 @@ public static class WorkLogClusterer
 
     private static WorkLogDto ToDto(WorkLogEntry entry) => WorkLogService.ToDto(entry);
 
+    private static string LinkedTitle(IReadOnlyList<WorkLogEntry> group)
+    {
+        var title = group.Select(item => item.TaskTitle).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            var key = group.Select(item => item.JiraKey).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+            return string.IsNullOrWhiteSpace(key) ? title : $"{key} {title}";
+        }
+
+        var jira = group.Select(item => item.JiraKey).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        return string.IsNullOrWhiteSpace(jira) ? PickTitle(group) : jira;
+    }
+
+    private static string ProblemTitle(IReadOnlyList<WorkLogEntry> group)
+    {
+        return group.Select(item => item.ProblemTitle).FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))
+               ?? PickTitle(group);
+    }
+
     private static string PickTitle(IReadOnlyList<WorkLogEntry> group)
     {
         return group
@@ -110,7 +150,10 @@ public static class WorkLogClusterer
             builder.AppendLine($"* {group.Title} — {FormatDuration(group.TotalMinutes)}");
             foreach (var entry in group.Entries)
             {
-                builder.AppendLine($"  {FormatClock(entry.CreatedAt)} {entry.Description} ({entry.DurationMinutes}m)");
+                var label = !string.IsNullOrWhiteSpace(entry.TaskTitle) ? entry.TaskTitle
+                    : !string.IsNullOrWhiteSpace(entry.ProblemTitle) ? entry.ProblemTitle
+                    : entry.Description;
+                builder.AppendLine($"  {FormatClock(entry.CreatedAt)} {label} ({entry.DurationMinutes}m)");
             }
 
             builder.AppendLine();

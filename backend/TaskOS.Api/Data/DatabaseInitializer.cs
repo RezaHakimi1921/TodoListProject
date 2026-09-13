@@ -17,7 +17,36 @@ public sealed class DatabaseInitializer
         ("WorkFocus", "ProblemId", "INTEGER NULL"),
         ("Task", "Ownership", "TEXT NOT NULL DEFAULT 'Mine'"),
         ("TaskJira", "Description", "TEXT NULL"),
-        ("WorkLogEntry", "JiraWorklogId", "TEXT NULL")
+        ("WorkLogEntry", "JiraWorklogId", "TEXT NULL"),
+        ("Task", "Pinned", "INTEGER NOT NULL DEFAULT 0"),
+        ("TaskJira", "AssigneeName", "TEXT NULL"),
+        ("TaskJira", "AssigneeDisplay", "TEXT NULL"),
+        ("Problem", "ExpectedBehavior", "TEXT NULL"),
+        ("Problem", "ActualBehavior", "TEXT NULL"),
+        ("Problem", "RootCause", "TEXT NULL"),
+        ("Problem", "DetectionGap", "TEXT NULL"),
+        ("Problem", "AffectedPopulation", "TEXT NULL"),
+        ("Problem", "Resolution", "TEXT NULL"),
+        ("Problem", "Recovery", "TEXT NULL"),
+        ("Problem", "ValidationNote", "TEXT NULL"),
+        ("Problem", "Prevention", "TEXT NULL"),
+        ("Problem", "ImpactBranches", "TEXT NULL"),
+        ("Problem", "ImpactCustomers", "TEXT NULL"),
+        ("Problem", "ImpactRecords", "TEXT NULL"),
+        ("Problem", "ImpactServices", "TEXT NULL"),
+        ("Problem", "ImpactSupport", "TEXT NULL"),
+        ("Problem", "ImpactBusiness", "TEXT NULL"),
+        ("Problem", "StartedAt", "TEXT NULL"),
+        ("Problem", "FirstAffectedAt", "TEXT NULL"),
+        ("Problem", "DetectedAt", "TEXT NULL"),
+        ("Problem", "RootCauseFoundAt", "TEXT NULL"),
+        ("Problem", "FixedAt", "TEXT NULL"),
+        ("Problem", "RecoveryCompletedAt", "TEXT NULL"),
+        ("Problem", "CostTechnical", "TEXT NULL"),
+        ("Problem", "CostOperational", "TEXT NULL"),
+        ("Problem", "CostBusiness", "TEXT NULL"),
+        ("Problem", "CostOpportunity", "TEXT NULL"),
+        ("Problem", "SectionSavedAt", "TEXT NULL")
     ];
 
     private readonly SqliteConnectionFactory _factory;
@@ -53,6 +82,7 @@ public sealed class DatabaseInitializer
         EnsureWorkLogAllowsBreak(connection);
         EnsureTaskJira(connection);
         EnsureJiraCommentInbox(connection);
+        EnsureProblemInvestigation(connection);
 
         if (!string.IsNullOrWhiteSpace(indexSql))
         {
@@ -162,5 +192,77 @@ public sealed class DatabaseInitializer
             CREATE INDEX IF NOT EXISTS IX_JiraCommentInbox_SeenAt ON JiraCommentInbox(SeenAt);
             CREATE INDEX IF NOT EXISTS IX_JiraCommentInbox_TaskId ON JiraCommentInbox(TaskId);
             """);
+    }
+
+    private static void EnsureProblemInvestigation(SqliteConnection connection)
+    {
+        using var lookup = connection.CreateCommand();
+        lookup.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'Problem'";
+        var sql = lookup.ExecuteScalar() as string ?? string.Empty;
+        if (sql.Contains("'Open'", StringComparison.OrdinalIgnoreCase)
+            && sql.Contains("'Monitoring'", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Execute(connection, "PRAGMA foreign_keys = OFF;");
+        Execute(connection, """
+            CREATE TABLE Problem_mig (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                Title TEXT NOT NULL,
+                Status TEXT NOT NULL CHECK (Status IN ('Open','Monitoring','Resolved')) DEFAULT 'Open',
+                NoTimeNote TEXT NULL,
+                InfiniteTimeNote TEXT NULL,
+                ChosenOptionId INTEGER NULL,
+                PremortemSign TEXT NULL,
+                ExpectedBehavior TEXT NULL,
+                ActualBehavior TEXT NULL,
+                RootCause TEXT NULL,
+                DetectionGap TEXT NULL,
+                AffectedPopulation TEXT NULL,
+                Resolution TEXT NULL,
+                Recovery TEXT NULL,
+                ValidationNote TEXT NULL,
+                Prevention TEXT NULL,
+                ImpactBranches TEXT NULL,
+                ImpactCustomers TEXT NULL,
+                ImpactRecords TEXT NULL,
+                ImpactServices TEXT NULL,
+                ImpactSupport TEXT NULL,
+                ImpactBusiness TEXT NULL,
+                StartedAt TEXT NULL,
+                FirstAffectedAt TEXT NULL,
+                DetectedAt TEXT NULL,
+                RootCauseFoundAt TEXT NULL,
+                FixedAt TEXT NULL,
+                RecoveryCompletedAt TEXT NULL,
+                CostTechnical TEXT NULL,
+                CostOperational TEXT NULL,
+                CostBusiness TEXT NULL,
+                CostOpportunity TEXT NULL,
+                SectionSavedAt TEXT NULL,
+                CreatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                UpdatedAt TEXT NOT NULL DEFAULT (datetime('now')),
+                DeletedAt TEXT NULL
+            );
+            INSERT INTO Problem_mig (
+                Id, Title, Status, NoTimeNote, InfiniteTimeNote, ChosenOptionId, PremortemSign,
+                CreatedAt, UpdatedAt, DeletedAt
+            )
+            SELECT
+                Id, Title,
+                CASE Status
+                    WHEN 'Exploring' THEN 'Open'
+                    WHEN 'Chosen' THEN 'Monitoring'
+                    WHEN 'Validated' THEN 'Resolved'
+                    ELSE Status
+                END,
+                NoTimeNote, InfiniteTimeNote, ChosenOptionId, PremortemSign,
+                CreatedAt, UpdatedAt, DeletedAt
+            FROM Problem;
+            DROP TABLE Problem;
+            ALTER TABLE Problem_mig RENAME TO Problem;
+            """);
+        Execute(connection, "PRAGMA foreign_keys = ON;");
     }
 }

@@ -6,7 +6,7 @@ namespace TaskOS.Api.Repositories;
 
 public sealed class WorkLogRepository : IWorkLogRepository
 {
-    private const string Columns = "Id, Description, DurationMinutes, Source, TaskId, ProblemId, CreatedAt, JiraWorklogId";
+    private const string Columns = "w.Id, w.Description, w.DurationMinutes, w.Source, w.TaskId, w.ProblemId, w.CreatedAt, w.JiraWorklogId, t.Title AS TaskTitle, j.JiraKey AS JiraKey, p.Title AS ProblemTitle";
     private readonly SqliteConnectionFactory _factory;
 
     public WorkLogRepository(SqliteConnectionFactory factory)
@@ -19,9 +19,13 @@ public sealed class WorkLogRepository : IWorkLogRepository
         const string sql = """
             INSERT INTO WorkLogEntry (Description, DurationMinutes, Source, TaskId, ProblemId, CreatedAt, JiraWorklogId)
             VALUES (@Description, @DurationMinutes, @Source, @TaskId, @ProblemId, @CreatedAt, @JiraWorklogId);
-            SELECT Id, Description, DurationMinutes, Source, TaskId, ProblemId, CreatedAt, JiraWorklogId
-            FROM WorkLogEntry
-            WHERE Id = last_insert_rowid();
+            SELECT w.Id, w.Description, w.DurationMinutes, w.Source, w.TaskId, w.ProblemId, w.CreatedAt, w.JiraWorklogId,
+                   t.Title AS TaskTitle, j.JiraKey AS JiraKey, p.Title AS ProblemTitle
+            FROM WorkLogEntry w
+            LEFT JOIN Task t ON t.Id = w.TaskId AND t.DeletedAt IS NULL
+            LEFT JOIN TaskJira j ON j.TaskId = w.TaskId
+            LEFT JOIN Problem p ON p.Id = w.ProblemId AND p.DeletedAt IS NULL
+            WHERE w.Id = last_insert_rowid();
             """;
         using var connection = _factory.Create();
         return await connection.QuerySingleAsync<WorkLogEntry>(sql, entry);
@@ -31,9 +35,12 @@ public sealed class WorkLogRepository : IWorkLogRepository
     {
         var sql = $"""
             SELECT {Columns}
-            FROM WorkLogEntry
-            WHERE date(CreatedAt) = @LogDate AND DeletedAt IS NULL
-            ORDER BY CreatedAt DESC, Id DESC
+            FROM WorkLogEntry w
+            LEFT JOIN Task t ON t.Id = w.TaskId AND t.DeletedAt IS NULL
+            LEFT JOIN TaskJira j ON j.TaskId = w.TaskId
+            LEFT JOIN Problem p ON p.Id = w.ProblemId AND p.DeletedAt IS NULL
+            WHERE date(w.CreatedAt) = @LogDate AND w.DeletedAt IS NULL
+            ORDER BY w.CreatedAt DESC, w.Id DESC
             """;
         using var connection = _factory.Create();
         var rows = await connection.QueryAsync<WorkLogEntry>(sql, new { LogDate = logDate });
@@ -44,9 +51,12 @@ public sealed class WorkLogRepository : IWorkLogRepository
     {
         var sql = $"""
             SELECT {Columns}
-            FROM WorkLogEntry
-            WHERE TaskId = @TaskId AND DeletedAt IS NULL
-            ORDER BY CreatedAt DESC, Id DESC
+            FROM WorkLogEntry w
+            LEFT JOIN Task t ON t.Id = w.TaskId AND t.DeletedAt IS NULL
+            LEFT JOIN TaskJira j ON j.TaskId = w.TaskId
+            LEFT JOIN Problem p ON p.Id = w.ProblemId AND p.DeletedAt IS NULL
+            WHERE w.TaskId = @TaskId AND w.DeletedAt IS NULL
+            ORDER BY w.CreatedAt DESC, w.Id DESC
             """;
         using var connection = _factory.Create();
         var rows = await connection.QueryAsync<WorkLogEntry>(sql, new { TaskId = taskId });
@@ -57,9 +67,12 @@ public sealed class WorkLogRepository : IWorkLogRepository
     {
         var sql = $"""
             SELECT {Columns}
-            FROM WorkLogEntry
-            WHERE ProblemId = @ProblemId AND DeletedAt IS NULL
-            ORDER BY CreatedAt DESC, Id DESC
+            FROM WorkLogEntry w
+            LEFT JOIN Task t ON t.Id = w.TaskId AND t.DeletedAt IS NULL
+            LEFT JOIN TaskJira j ON j.TaskId = w.TaskId
+            LEFT JOIN Problem p ON p.Id = w.ProblemId AND p.DeletedAt IS NULL
+            WHERE w.ProblemId = @ProblemId AND w.DeletedAt IS NULL
+            ORDER BY w.CreatedAt DESC, w.Id DESC
             """;
         using var connection = _factory.Create();
         var rows = await connection.QueryAsync<WorkLogEntry>(sql, new { ProblemId = problemId });
@@ -73,13 +86,16 @@ public sealed class WorkLogRepository : IWorkLogRepository
             || source.Equals(WorkLogSources.Extension, StringComparison.OrdinalIgnoreCase);
         var sql = $"""
             SELECT {Columns}
-            FROM WorkLogEntry
-            WHERE TaskId = @TaskId AND DeletedAt IS NULL AND CreatedAt >= @Since
+            FROM WorkLogEntry w
+            LEFT JOIN Task t ON t.Id = w.TaskId AND t.DeletedAt IS NULL
+            LEFT JOIN TaskJira j ON j.TaskId = w.TaskId
+            LEFT JOIN Problem p ON p.Id = w.ProblemId AND p.DeletedAt IS NULL
+            WHERE w.TaskId = @TaskId AND w.DeletedAt IS NULL AND w.CreatedAt >= @Since
               AND (
-                    @Automatic = 1 AND Source IN ('Timer', 'Extension')
-                    OR @Automatic = 0 AND Source = @Source
+                    @Automatic = 1 AND w.Source IN ('Timer', 'Extension')
+                    OR @Automatic = 0 AND w.Source = @Source
                   )
-            ORDER BY Id DESC
+            ORDER BY w.Id DESC
             LIMIT 1
             """;
         using var connection = _factory.Create();
@@ -92,6 +108,27 @@ public sealed class WorkLogRepository : IWorkLogRepository
         });
     }
 
+    public async Task<WorkLogEntry?> GetByIdAsync(int id)
+    {
+        var sql = $"""
+            SELECT {Columns}
+            FROM WorkLogEntry w
+            LEFT JOIN Task t ON t.Id = w.TaskId AND t.DeletedAt IS NULL
+            LEFT JOIN TaskJira j ON j.TaskId = w.TaskId
+            LEFT JOIN Problem p ON p.Id = w.ProblemId AND p.DeletedAt IS NULL
+            WHERE w.Id = @Id AND w.DeletedAt IS NULL
+            """;
+        using var connection = _factory.Create();
+        return await connection.QuerySingleOrDefaultAsync<WorkLogEntry>(sql, new { Id = id });
+    }
+
+    public async Task SetDescriptionAsync(int id, string description)
+    {
+        using var connection = _factory.Create();
+        await connection.ExecuteAsync(
+            "UPDATE WorkLogEntry SET Description = @Description WHERE Id = @Id AND DeletedAt IS NULL",
+            new { Id = id, Description = description });
+    }
     public async Task SetJiraWorklogIdAsync(int id, string jiraWorklogId)
     {
         using var connection = _factory.Create();
@@ -106,5 +143,13 @@ public sealed class WorkLogRepository : IWorkLogRepository
         await connection.ExecuteAsync(
             "UPDATE WorkLogEntry SET DurationMinutes = DurationMinutes + @Extra WHERE Id = @Id",
             new { Id = id, Extra = extra });
+    }
+
+    public async Task SetDurationMinutesAsync(int id, int minutes)
+    {
+        using var connection = _factory.Create();
+        await connection.ExecuteAsync(
+            "UPDATE WorkLogEntry SET DurationMinutes = @Minutes WHERE Id = @Id AND DeletedAt IS NULL",
+            new { Id = id, Minutes = minutes });
     }
 }

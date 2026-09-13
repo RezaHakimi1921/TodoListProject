@@ -23,6 +23,32 @@ export function daysAgoIso(days: number) {
   return new Date(d.getTime() - offset).toISOString().slice(0, 10)
 }
 
+export function addDaysIso(dateIso: string, days: number) {
+  const d = parseDateInput(dateIso)
+  d.setDate(d.getDate() + days)
+  const offset = d.getTimezoneOffset() * 60_000
+  return new Date(d.getTime() - offset).toISOString().slice(0, 10)
+}
+
+export function formatMinutesLabel(total: number) {
+  const safe = Math.max(0, Math.round(Number(total) || 0))
+  const hours = Math.floor(safe / 60)
+  const minutes = safe % 60
+  if (hours <= 0) return `${minutes} دقیقه`
+  if (minutes <= 0) return `${hours} ساعت`
+  return `${hours} ساعت و ${minutes} دقیقه`
+}
+
+export function formatElapsedClock(totalSeconds: number) {
+  const safe = Math.max(0, Math.floor(totalSeconds))
+  const hours = Math.floor(safe / 3600)
+  const minutes = Math.floor((safe % 3600) / 60)
+  const seconds = safe % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  if (hours > 0) return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
+  return `${pad(minutes)}:${pad(seconds)}`
+}
+
 export function formatPersianDate(dateString?: string | null): string {
   if (!dateString) return ''
   try {
@@ -81,4 +107,34 @@ export function getRelativeDayLabel(dateIso: string): string {
   if (dateIso === today) return 'امروز'
   if (dateIso === yest) return 'دیروز'
   return formatPersianDate(dateIso)
+}
+
+export function formatClock(dateString?: string | null): string {
+  if (!dateString) return ''
+  try {
+    const d = new Date(dateString)
+    if (isNaN(d.getTime())) return ''
+    return new Intl.DateTimeFormat('fa-IR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d)
+  } catch {
+    return ''
+  }
+}
+
+export function workLogStartedAt(endedAt?: string | null, minutes?: number) {
+  const end = endedAt ? Date.parse(endedAt) : NaN
+  if (!Number.isFinite(end)) return endedAt ?? ''
+  const span = Math.max(0, Number(minutes) || 0) * 60_000
+  return new Date(end - span).toISOString()
+}
+
+export function formatWorkLogSpan(startedAt?: string | null, endedAt?: string | null): string {
+  const date = formatPersianDateShort(endedAt || startedAt)
+  const from = formatClock(startedAt)
+  const to = formatClock(endedAt)
+  if (date && from && to) return date + ' · ' + from + ' تا ' + to
+  if (date && to) return date + ' · ' + to
+  return date || to || from
 }

@@ -25,6 +25,15 @@ function matches(title: string, query: string) {
   return title.toLowerCase().includes(query.trim().toLowerCase())
 }
 
+function matchesTask(task: TaskItem, query: string) {
+  if (!query.trim()) return true
+  const q = query.trim().toLowerCase()
+  const key = (task.jiraKey ?? '').toLowerCase()
+  return task.title.toLowerCase().includes(q)
+    || key.includes(q)
+    || String(task.id).includes(q)
+    || (task.jiraUrl ?? '').toLowerCase().includes(q)
+}
 function samePick(a: WorkPick | null, b: WorkPick) {
   if (!a || a.kind !== b.kind) return false
   if (a.kind === 'current' || a.kind === 'break') return a.title === b.title
@@ -76,7 +85,7 @@ export function WorkLogPrompt() {
   const openTasks = useMemo(() => {
     const rank: Record<string, number> = { Doing: 0, Stuck: 1, Open: 2 }
     return (pickTasksQuery.data ?? [])
-      .filter((task) => (queryText.trim() || task.status !== 'Done') && matches(task.title, queryText))
+      .filter((task) => (queryText.trim() || task.status !== 'Done') && matchesTask(task, queryText))
       .sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))
   }, [pickTasksQuery.data, queryText])
 
@@ -250,9 +259,9 @@ export function WorkLogPrompt() {
 
   return (
     <>
-      <div className="fixed bottom-4 left-4 z-30 flex max-w-[min(100%-2rem,42rem)] flex-wrap gap-2">
+      <div className="fixed bottom-4 inset-x-4 z-30 flex max-w-[min(100%-2rem,42rem)] flex-wrap justify-center gap-2 sm:inset-x-auto sm:left-4 sm:justify-start">
         {current && (
-          <span className="rounded-full bg-ember/20 px-3 py-2 text-xs text-amber-100">
+          <span className="max-w-[min(70vw,18rem)] truncate rounded-full bg-ember/20 px-3 py-2 text-xs text-amber-100">
             الان: {current}
           </span>
         )}
@@ -589,7 +598,7 @@ function PickLists({
                   selected ? 'bg-ember font-semibold text-ink-950' : 'bg-ink-800'
                 }`}
               >
-                <span>{task.title}</span>
+                <span>{task.title}</span>{task.jiraKey ? <span className="mr-2 text-[11px] opacity-70">{task.jiraKey}</span> : null}
                 <span className="mr-2 text-xs opacity-60">{STATUS_LABEL[task.status]}</span>
               </button>
             )

@@ -4,6 +4,7 @@ public sealed class NotificationDto
 {
     public int Id { get; set; }
     public int TaskId { get; set; }
+    public string Kind { get; set; } = "comment";
     public string TaskTitle { get; set; } = string.Empty;
     public string TaskStatus { get; set; } = string.Empty;
     public string JiraKey { get; set; } = string.Empty;
