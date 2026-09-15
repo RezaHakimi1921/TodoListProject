@@ -85,6 +85,7 @@ public sealed class DatabaseInitializer
         EnsureJiraCommentInbox(connection);
         EnsureProblemInvestigation(connection);
         EnsurePushSubscriptions(connection);
+        EnsureTaskReminders(connection);
 
         if (!string.IsNullOrWhiteSpace(indexSql))
         {
@@ -268,6 +269,21 @@ public sealed class DatabaseInitializer
         Execute(connection, "PRAGMA foreign_keys = ON;");
     }
 
+    private static void EnsureTaskReminders(SqliteConnection connection)
+    {
+        Execute(connection, """
+            CREATE TABLE IF NOT EXISTS TaskReminder (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                TaskId INTEGER NOT NULL REFERENCES Task(Id) ON DELETE CASCADE,
+                RemindAt TEXT NOT NULL,
+                Note TEXT NULL,
+                CreatedAt TEXT NOT NULL,
+                FiredAt TEXT NULL
+            );
+            CREATE INDEX IF NOT EXISTS IX_TaskReminder_Due ON TaskReminder(FiredAt, RemindAt);
+            CREATE INDEX IF NOT EXISTS IX_TaskReminder_TaskId ON TaskReminder(TaskId);
+            """);
+    }
     private static void EnsurePushSubscriptions(SqliteConnection connection)
     {
         Execute(connection, """

@@ -1,6 +1,6 @@
 import { api } from './client'
 
-export type NotificationKind = 'comment' | 'new-task'
+export type NotificationKind = 'comment' | 'new-task' | 'reminder'
 
 export interface CommentNotification {
   id: number
@@ -26,10 +26,13 @@ export interface UnreadNotificationCount {
   count: number
   newTasks: number
   comments: number
+  khadang: number
+  reminders: number
 }
 
 function asKind(value: unknown, commentId: string): NotificationKind {
   if (value === 'new-task' || String(commentId).startsWith('new-task:')) return 'new-task'
+  if (value === 'reminder' || String(commentId).startsWith('reminder:')) return 'reminder'
   return 'comment'
 }
 
@@ -64,6 +67,8 @@ export function getUnreadNotificationCount(): Promise<UnreadNotificationCount> {
     count: Number(row.count ?? 0),
     newTasks: Number(row.newTasks ?? 0),
     comments: Number(row.comments ?? 0),
+    khadang: Number(row.khadang ?? 0),
+    reminders: Number(row.reminders ?? 0),
   }))
 }
 
@@ -81,6 +86,14 @@ export function markNotificationRead(id: number) {
 export function markTaskNotificationsRead(taskId: number) {
   emitTaskNotificationsRead(taskId)
   return api.post<{ ok: boolean }>(`/api/notifications/read-task/${taskId}`, {})
+}
+
+export function markReminderNotificationsRead(taskId: number) {
+  return api.post<{ ok: boolean }>(`/api/notifications/read-reminders/${taskId}`, {})
+}
+
+export function markAllReminderNotificationsRead() {
+  return api.post<{ ok: boolean }>('/api/notifications/read-reminders', {})
 }
 
 export function markNotificationsReadByKey(jiraKey: string) {

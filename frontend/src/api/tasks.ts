@@ -31,6 +31,9 @@ const camel = (row: Record<string, unknown>): TaskItem => ({
   assigneeName: (row.assigneeName as string | null) ?? null,
   assigneeDisplay: (row.assigneeDisplay as string | null) ?? null,
   pinned: Boolean(row.pinned),
+  nextReminderAt: (row.nextReminderAt as string | null) ?? null,
+  reminderCount: Number(row.reminderCount ?? 0),
+  unreadReminderCount: Number(row.unreadReminderCount ?? 0),
   problems: Array.isArray(row.problems)
     ? (row.problems as Record<string, unknown>[]).map((item) => ({
         id: Number(item.id),

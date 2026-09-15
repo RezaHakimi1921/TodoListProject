@@ -30,7 +30,15 @@ public sealed class SettingsController : ControllerBase
     [HttpPost("test-toast")]
     public async Task<IActionResult> TestToast()
     {
-        var shown = await _ping.TryNotifyAsync(force: true);
-        return shown ? Ok(await _settings.GetAsync()) : StatusCode(500, new { error = "Toast failed" });
+        try
+        {
+            WindowsToast.Show("TaskOS", "تست اعلان — الان روی چه کاری وقت گذاشتی؟");
+            return Ok(await _settings.GetAsync());
+        }
+        catch (Exception)
+        {
+            var shown = await _ping.TryNotifyAsync(force: true);
+            return shown ? Ok(await _settings.GetAsync()) : StatusCode(500, new { error = "Toast failed" });
+        }
     }
 }

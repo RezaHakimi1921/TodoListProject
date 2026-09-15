@@ -1,17 +1,25 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { Bell, MessageCircle, TicketPlus } from 'lucide-react'
+import { Bell, Bot, MessageCircle, TicketPlus } from 'lucide-react'
 import { listNotifications, markNotificationRead, type CommentNotification } from '../api/notifications'
 import { formatPersianDateTime } from '../lib/dates'
+import { isKhadangAgent } from '../api/jira'
 import { STATUS_LABEL, type TaskStatus } from '../types'
 
-type InboxTab = 'new-tasks' | 'new-comments' | 'all-tasks' | 'all-comments'
+type InboxTab = 'new-tasks' | 'new-comments' | 'new-khadang' | 'all-tasks' | 'all-comments' | 'all-khadang'
+
+const PAGE_SIZE = 20
+
+function isKhadangItem(item: CommentNotification) {
+  return item.kind === 'comment' && isKhadangAgent(item.authorName)
+}
 
 export function NotificationsPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<InboxTab>('new-tasks')
+  const [page, setPage] = useState(0)
 
   const listQuery = useQuery({
     queryKey: ['notifications', 'all'],
@@ -32,7 +40,11 @@ export function NotificationsPage() {
     [allItems],
   )
   const newComments = useMemo(
-    () => allItems.filter((item) => item.kind === 'comment' && !item.read),
+    () => allItems.filter((item) => item.kind === 'comment' && !item.read && !isKhadangItem(item)),
+    [allItems],
+  )
+  const newKhadang = useMemo(
+    () => allItems.filter((item) => isKhadangItem(item) && !item.read),
     [allItems],
   )
   const allTasks = useMemo(
@@ -40,21 +52,39 @@ export function NotificationsPage() {
     [allItems],
   )
   const allComments = useMemo(
-    () => allItems.filter((item) => item.kind === 'comment'),
+    () => allItems.filter((item) => item.kind === 'comment' && !isKhadangItem(item)),
+    [allItems],
+  )
+  const allKhadang = useMemo(
+    () => allItems.filter((item) => isKhadangItem(item)),
     [allItems],
   )
 
-  const items =
+  const allForTab =
     tab === 'new-tasks' ? newTasks
     : tab === 'new-comments' ? newComments
+    : tab === 'new-khadang' ? newKhadang
     : tab === 'all-tasks' ? allTasks
-    : allComments
+    : tab === 'all-comments' ? allComments
+    : allKhadang
+
+  useEffect(() => {
+    setPage(0)
+  }, [tab])
+
+  const totalPages = Math.max(1, Math.ceil(allForTab.length / PAGE_SIZE))
+  const items = useMemo(
+    () => allForTab.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
+    [allForTab, page],
+  )
 
   const emptyText =
     tab === 'new-tasks' ? 'تسک جدیدی نیست'
     : tab === 'new-comments' ? 'کامنت جدیدی نیست'
+    : tab === 'new-khadang' ? 'نوتیف خدنگ جدیدی نیست'
     : tab === 'all-tasks' ? 'هنوز تسک جدیدی ثبت نشده'
-    : 'هنوز کامنتی نیست'
+    : tab === 'all-comments' ? 'هنوز کامنتی نیست'
+    : 'هنوز نوتیف خدنگی نیست'
 
   const openItem = (item: CommentNotification) => {
     if (!item.read) {
@@ -75,7 +105,7 @@ export function NotificationsPage() {
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-white">نوتیفیکیشن</h1>
             <p className="mt-1 text-xs sm:text-sm text-slate-400">
-              تسک‌های جدید و کامنت‌های جیرا را جدا ببین
+              تسک جدید، کامنت جیرا و خدنگ را جدا ببین
             </p>
           </div>
         </div>
@@ -87,11 +117,17 @@ export function NotificationsPage() {
           <TabButton active={tab === 'new-comments'} count={newComments.length} tone="sky" onClick={() => setTab('new-comments')}>
             کامنت جدید
           </TabButton>
+          <TabButton active={tab === 'new-khadang'} count={newKhadang.length} tone="teal" onClick={() => setTab('new-khadang')}>
+            خدنگ
+          </TabButton>
           <TabButton active={tab === 'all-tasks'} count={allTasks.length} onClick={() => setTab('all-tasks')}>
             همه تسک‌ها
           </TabButton>
           <TabButton active={tab === 'all-comments'} count={allComments.length} onClick={() => setTab('all-comments')}>
             همه کامنت‌ها
+          </TabButton>
+          <TabButton active={tab === 'all-khadang'} count={allKhadang.length} onClick={() => setTab('all-khadang')}>
+            همه خدنگ
           </TabButton>
         </div>
       </div>
@@ -104,7 +140,9 @@ export function NotificationsPage() {
           </div>
         ) : (
           <div className="divide-y divide-slate-800/80">
-            {items.map((item) => (
+            {items.map((item) => {
+              const isKhadang = isKhadangItem(item)
+              return (
               <button
                 key={item.id}
                 type="button"
@@ -112,11 +150,27 @@ export function NotificationsPage() {
                 className="w-full text-right py-3.5 flex flex-col gap-1.5 hover:bg-white/[0.02] px-1 rounded-xl transition-colors"
               >
                 <div className="flex flex-wrap items-center gap-2">
-                  {!item.read ? <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" /> : null}
-                  {item.kind === 'new-task' ? (
+                  {!item.read ? (
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                        isKhadang ? 'bg-teal-400' : item.kind === 'new-task' ? 'bg-amber-400' : 'bg-sky-400'
+                      }`}
+                    />
+                  ) : null}
+                  {item.kind === 'reminder' ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-100 border border-violet-500/30">
+                      <Bell className="w-3 h-3" />
+                      یادآوری
+                    </span>
+                  ) : item.kind === 'new-task' ? (
                     <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-400/10 text-amber-200 border border-amber-400/20">
                       <TicketPlus className="w-3 h-3" />
                       تسک جدید
+                    </span>
+                  ) : isKhadang ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-teal-600/15 text-teal-100 border border-teal-500/35">
+                      <Bot className="w-3 h-3" />
+                      خدنگ
                     </span>
                   ) : (
                     <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-sky-400/10 text-sky-200 border border-sky-400/20">
@@ -136,18 +190,45 @@ export function NotificationsPage() {
                 </div>
                 {item.kind === 'new-task' ? (
                   <p className="text-xs text-amber-100/80 leading-relaxed">تسک جدید ثبت شد</p>
+                ) : item.kind === 'reminder' ? (
+                  <p className="text-xs text-violet-100/90 leading-relaxed">{item.body}</p>
                 ) : (
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    <span className="text-sky-300 font-medium">{item.authorName}</span>
+                    <span className={`font-medium ${isKhadang ? 'text-teal-300' : 'text-sky-300'}`}>
+                      {isKhadang ? `خدنگ · ${item.authorName}` : item.authorName}
+                    </span>
                     <span className="text-slate-500">: </span>
                     {item.body}
                   </p>
                 )}
                 <span className="text-[11px] text-slate-500 font-mono">{formatPersianDateTime(item.createdAt)}</span>
               </button>
-            ))}
+            )})}
           </div>
         )}
+        {allForTab.length > PAGE_SIZE ? (
+          <div className="mt-4 flex items-center justify-between gap-2 border-t border-white/[0.05] pt-3">
+            <button
+              type="button"
+              disabled={page <= 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              className="px-3 py-1.5 rounded-lg text-xs border border-white/10 text-slate-300 disabled:opacity-40 hover:bg-white/[0.04]"
+            >
+              قبلی
+            </button>
+            <span className="text-[11px] text-slate-500 font-mono">
+              {page + 1} / {totalPages} · {allForTab.length} مورد
+            </span>
+            <button
+              type="button"
+              disabled={page >= totalPages - 1}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              className="px-3 py-1.5 rounded-lg text-xs border border-white/10 text-slate-300 disabled:opacity-40 hover:bg-white/[0.04]"
+            >
+              بعدی
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   )
@@ -162,13 +243,14 @@ function TabButton({
 }: {
   active: boolean
   count: number
-  tone?: 'amber' | 'sky'
+  tone?: 'amber' | 'sky' | 'teal'
   onClick: () => void
   children: string
 }) {
   const countClass =
     tone === 'amber' ? 'text-amber-300'
     : tone === 'sky' ? 'text-sky-300'
+    : tone === 'teal' ? 'text-teal-300'
     : 'text-slate-400'
   return (
     <button

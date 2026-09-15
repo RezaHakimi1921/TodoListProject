@@ -32,7 +32,7 @@ public sealed class JiraRestClient : IJiraRestClient
         _http = http;
     }
 
-    public async Task AddIssueCommentAsync(string jiraKey, string body, CancellationToken cancellationToken = default)
+    public async Task AddIssueCommentAsync(string jiraKey, string body, bool internalComment = false, CancellationToken cancellationToken = default)
     {
         var key = RequireKey(jiraKey);
         var text = (body ?? string.Empty).Trim();
@@ -41,9 +41,26 @@ public sealed class JiraRestClient : IJiraRestClient
             throw new ArgumentException("Comment body is required.");
         }
 
+        // Jira Service Desk: sd.public.comment.internal true = team-only, false = share with customer
+        var payload = new Dictionary<string, object?>
+        {
+            ["body"] = text,
+            ["properties"] = new object[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["key"] = "sd.public.comment",
+                    ["value"] = new Dictionary<string, object?>
+                    {
+                        ["internal"] = internalComment,
+                    },
+                },
+            },
+        };
+
         using var response = await _http.PostAsJsonAsync(
             $"rest/api/2/issue/{Uri.EscapeDataString(key)}/comment",
-            new { body = text },
+            payload,
             cancellationToken);
 
         if (response.IsSuccessStatusCode)
@@ -655,6 +672,38 @@ public sealed class JiraRestClient : IJiraRestClient
         return rows;
     }
 
+
+    public async Task<IReadOnlyList<JiraUserOption>> SearchAssignableUsersAsync(string projectKey, string? query, CancellationToken cancellationToken = default)
+    {
+        var project = string.IsNullOrWhiteSpace(projectKey) ? CreateProject : projectKey.Trim().ToUpperInvariant();
+        var q = (query ?? string.Empty).Trim();
+        var url = string.IsNullOrWhiteSpace(q)
+            ? $"rest/api/2/user/assignable/search?project={Uri.EscapeDataString(project)}&maxResults=30"
+            : $"rest/api/2/user/assignable/search?project={Uri.EscapeDataString(project)}&username={Uri.EscapeDataString(q)}&maxResults=30";
+
+        using var response = await _http.GetAsync(url, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new JiraRestException((int)response.StatusCode, raw);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken);
+        var users = new List<JiraUserOption>();
+        if (doc.RootElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var row in doc.RootElement.EnumerateArray())
+            {
+                var name = row.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null;
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                var display = row.TryGetProperty("displayName", out var displayEl) ? displayEl.GetString() : name;
+                users.Add(new JiraUserOption { Name = name, DisplayName = display ?? name });
+            }
+        }
+
+        return users;
+    }
     private static JiraIssueComments? ParseIssueComments(JsonElement issue)
     {
         var key = issue.TryGetProperty("key", out var keyEl) ? keyEl.GetString() : null;

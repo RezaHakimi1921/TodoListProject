@@ -70,19 +70,21 @@ builder.Services.AddScoped<IWorkPingService, WorkPingService>();
 builder.Services.AddSingleton<IJiraWatchService, JiraWatchService>();
 builder.Services.AddScoped<IJiraCommentInboxRepository, JiraCommentInboxRepository>();
 builder.Services.AddScoped<IJiraCommentInboxService, JiraCommentInboxService>();
+builder.Services.AddScoped<ITaskReminderRepository, TaskReminderRepository>();
+builder.Services.AddScoped<ITaskReminderService, TaskReminderService>();
 builder.Services.AddSingleton<IPushNotificationService, PushNotificationService>();
 builder.Services.AddScoped<JiraDoneCommentService>();
 if (pushOnly)
 {
     builder.Services.AddHostedService<PushInboxRelayHostedService>();
-    builder.Services.AddHostedService<WorkPingRelayHostedService>();
 }
 else
 {
-    builder.Services.AddHostedService<WorkPingHostedService>();
+    // WorkPingHostedService removed — no periodic focus reminders.
     builder.Services.AddHostedService<IncomingPsSyncHostedService>();
     builder.Services.AddHostedService<JiraWatchHostedService>();
     builder.Services.AddHostedService<JiraDoneCommentHostedService>();
+    builder.Services.AddHostedService<TaskReminderHostedService>();
 }
 
 var app = builder.Build();

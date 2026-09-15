@@ -109,7 +109,8 @@ public sealed class FocusService : IFocusService
         var current = await GetAsync();
         if (current.IsResting)
         {
-            await _settings.SetRestingAsync(false);
+            await FlushRestLogAsync();
+            current = await GetAsync();
         }
         else
         {
@@ -163,7 +164,12 @@ public sealed class FocusService : IFocusService
     public async Task<WorkFocusDto> FinishAsync(FocusActionRequest request)
     {
         var focus = await GetAsync();
-        if (focus.Active && !focus.IsResting)
+        if (focus.IsResting)
+        {
+            await FlushRestLogAsync();
+            focus = await GetAsync();
+        }
+        else if (focus.Active)
         {
             await LogElapsedWorkAsync(focus, request.Source);
         }
@@ -185,7 +191,11 @@ public sealed class FocusService : IFocusService
     public async Task<WorkFocusDto> ClearAsync()
     {
         var focus = await GetAsync();
-        if (focus.Active && !focus.IsResting)
+        if (focus.IsResting)
+        {
+            await FlushRestLogAsync();
+        }
+        else if (focus.Active)
         {
             await LogElapsedWorkAsync(focus, WorkLogSources.Timer);
         }
@@ -217,9 +227,14 @@ public sealed class FocusService : IFocusService
             await _settings.UpdateAsync(new AppSettingsDto { PingMinutes = settings.PingMinutes, Paused = true });
         }
 
-        else if (focus.TaskId is int previousRest && previousRest != activityTaskId)
+        else
         {
-            await ReopenActivityAsync(previousRest);
+            // Switching دیلی/نهار/استراحت while already resting must not drop the previous slice.
+            await FlushRestLogAsync(keepResting: true);
+            if (focus.TaskId is int previousRest && previousRest != activityTaskId)
+            {
+                await ReopenActivityAsync(previousRest);
+            }
         }
 
         var title = string.IsNullOrWhiteSpace(description) ? "استراحت" : description.Trim();
@@ -260,8 +275,35 @@ public sealed class FocusService : IFocusService
 
     public async Task<WorkFocusDto> EndRestAsync(string? note = null)
     {
+        await FlushRestLogAsync(keepResting: false, note: note);
+        var resume = await _settings.ConsumeRestResumeAsync();
+        if (!string.IsNullOrWhiteSpace(resume.Description))
+        {
+            return await SetAsync(new SetFocusRequest
+            {
+                Description = resume.Description,
+                TaskId = resume.TaskId,
+                ProblemId = resume.ProblemId,
+                Log = false
+            });
+        }
+
+        return await ClearAsync();
+    }
+
+    /// <summary>
+    /// Writes the current rest/activity slice as a Break work log, then clears resting state
+    /// (unless keepResting). Does not resume the pre-rest task — callers decide what comes next.
+    /// </summary>
+    private async Task FlushRestLogAsync(bool keepResting = false, string? note = null)
+    {
         var focus = await GetAsync();
-        if (focus.IsResting && !string.IsNullOrWhiteSpace(focus.StartedAt)
+        if (!focus.IsResting)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(focus.StartedAt)
             && DateTime.TryParse(focus.StartedAt, out var started))
         {
             var minutes = SameDayLogMinutes(started);
@@ -290,22 +332,13 @@ public sealed class FocusService : IFocusService
         {
             await ReopenActivityAsync(endedId);
         }
+
         await _settings.SetRestNoteAsync(null);
-        var resume = await _settings.ConsumeRestResumeAsync();
-        if (!string.IsNullOrWhiteSpace(resume.Description))
+        if (!keepResting)
         {
-            return await SetAsync(new SetFocusRequest
-            {
-                Description = resume.Description,
-                TaskId = resume.TaskId,
-                ProblemId = resume.ProblemId,
-                Log = false
-            });
+            await _settings.SetRestingAsync(false);
         }
-
-        return await ClearAsync();
     }
-
     public Task FlushElapsedSliceAsync()
     {
         // Time stays on StartedAt until the user leaves the task (Set/Finish/Clear/Rest).

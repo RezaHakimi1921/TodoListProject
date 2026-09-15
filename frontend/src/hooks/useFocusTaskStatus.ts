@@ -24,7 +24,8 @@ export function useFocusTaskStatus() {
   const focusQuery = useQuery({
     queryKey: ['focus'],
     queryFn: getFocus,
-    refetchInterval: 4000,
+    refetchInterval: 12_000,
+    staleTime: 4_000,
   })
   const tasksQuery = useQuery({
     queryKey: ['tasks'],

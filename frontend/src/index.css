@@ -90,3 +90,13 @@ html[data-theme='light'] .work-dock-ping.is-off { color: #ffffff !important; bac
 html[data-theme='light'] .work-dock-test { color: #111827 !important; background: #ffffff !important; border-color: #111827 !important; }
 html[data-theme='light'] .work-dock-eta { color: #1f2937 !important; background: #e5e7eb !important; }
 html[data-theme='light'] .work-dock-eta.is-off { color: #9f1239 !important; background: #ffe4e6 !important; }
+
+.pending-switch-msg { color: rgb(254 243 199 / 0.95); }
+.pending-switch-key { color: rgb(253 230 138 / 0.7); }
+html[data-theme='light'] .pending-switch-msg { color: #78350f !important; }
+html[data-theme='light'] .pending-switch-key { color: #92400e !important; }
+html[data-theme='light'] .pending-switch-hold {
+  color: #111827 !important;
+  background: #f3f4f6 !important;
+  border-color: #d1d5db !important;
+}

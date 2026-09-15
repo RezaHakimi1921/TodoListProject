@@ -27,6 +27,7 @@ import { JIRA_ISSUE_STATE_KEY } from '../hooks/useJiraClosedTasks'
 import { taskJiraKey } from '../lib/jira'
 import { QuickAddTask } from '../components/QuickAddTask'
 import { TaskCard } from '../components/TaskCard'
+import { TaskReminderModal } from '../components/TaskReminderModal'
 import { TaskEditorDrawer } from '../components/TaskEditorDrawer'
 import { AgingModal } from '../components/AgingModal'
 import { JalaliMonthCalendar } from '../components/JalaliMonthCalendar'
@@ -59,6 +60,7 @@ export function DashboardPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [viewMode, setViewMode] = useState<'standard' | 'zen'>('standard')
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null)
+  const [reminderTask, setReminderTask] = useState<TaskItem | null>(null)
   const [agingTask, setAgingTask] = useState<TaskItem | null>(null)
   const [showRolloverModal, setShowRolloverModal] = useState(false)
   const [rolloverNote, setRolloverNote] = useState('')
@@ -525,7 +527,8 @@ export function DashboardPage() {
                     key={task.id}
                     task={task}
                     onOpenDrawer={setEditingTask}
-                    onOpenAging={setAgingTask}
+                    onOpenReminder={setReminderTask}
+                  onOpenAging={setAgingTask}
                   />
                 ))
               )}
@@ -559,7 +562,8 @@ export function DashboardPage() {
                     key={task.id}
                     task={task}
                     onOpenDrawer={setEditingTask}
-                    onOpenAging={setAgingTask}
+                    onOpenReminder={setReminderTask}
+                  onOpenAging={setAgingTask}
                   />
                 ))
               )}
@@ -592,6 +596,7 @@ export function DashboardPage() {
                   key={task.id}
                   task={task}
                   onOpenDrawer={setEditingTask}
+                  onOpenReminder={setReminderTask}
                   onOpenAging={setAgingTask}
                 />
               ))
@@ -680,6 +685,7 @@ export function DashboardPage() {
       />
 
       {/* Aging Modal */}
+      <TaskReminderModal task={reminderTask} onClose={() => setReminderTask(null)} />
       <AgingModal
         task={agingTask}
         onClose={() => setAgingTask(null)}

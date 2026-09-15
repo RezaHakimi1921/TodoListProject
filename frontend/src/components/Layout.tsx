@@ -10,12 +10,14 @@ import {
   Zap, 
   BarChart3,
   Bell,
+  Clock,
   Menu,
   X
 } from 'lucide-react'
 import { listTrash } from '../api/trash'
 import { listTasks } from '../api/tasks'
 import { getUnreadNotificationCount } from '../api/notifications'
+import { listPendingReminders } from '../api/reminders'
 import { WorkLogPrompt } from './WorkLogPrompt'
 import { PastDaysMenu } from './PastDaysMenu'
 import { formatPersianDate } from '../lib/dates'
@@ -36,19 +38,30 @@ export function Layout() {
   const trashQuery = useQuery({
     queryKey: ['trash'],
     queryFn: () => listTrash(),
+    staleTime: 60_000,
   })
 
   const tasksQuery = useQuery({
     queryKey: ['tasks'],
     queryFn: () => listTasks(),
+    staleTime: 10_000,
   })
 
   const unreadQuery = useQuery({
     queryKey: ['notifications', 'unread-count'],
     queryFn: () => getUnreadNotificationCount(),
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
+    staleTime: 10_000,
   })
-  const unread = unreadQuery.data ?? { count: 0, newTasks: 0, comments: 0 }
+  const pendingRemindersQuery = useQuery({
+    queryKey: ['reminders', 'pending'],
+    queryFn: listPendingReminders,
+    refetchInterval: 30_000,
+    staleTime: 10_000,
+  })
+  const unread = unreadQuery.data ?? { count: 0, newTasks: 0, comments: 0, khadang: 0, reminders: 0 }
+  const pendingReminderCount = pendingRemindersQuery.data?.length ?? 0
+  const reminderNavBadge = pendingReminderCount
   const trashCount = trashQuery.data?.length ?? 0
   const mineOpen = (tasksQuery.data ?? []).filter((t) => t.status !== 'Done' && t.ownership !== 'Other')
   const activeTasksCount = mineOpen.length
@@ -59,10 +72,17 @@ export function Layout() {
   const navItems = [
     { to: '/', label: 'کارهای امروز', icon: CheckSquare, end: true },
     {
+      to: '/reminders',
+      label: 'یادآوری',
+      icon: Clock,
+      badge: reminderNavBadge > 0 ? reminderNavBadge : null,
+      badgeTone: 'violet' as const,
+    },
+    {
       to: '/notifications',
       label: 'نوتیفیکیشن',
       icon: Bell,
-      badges: { newTasks: unread.newTasks, comments: unread.comments },
+      badges: { newTasks: unread.newTasks, comments: unread.comments, khadang: unread.khadang },
     },
     { to: '/reports', label: 'گزارش', icon: BarChart3 },
     { to: '/problems', label: 'تحقیق مسئله', icon: HelpCircle },
@@ -142,7 +162,26 @@ export function Layout() {
           </div>
 
           {menuOpen ? (
-            <nav className="md:hidden border-t border-white/[0.05] py-2 space-y-1">
+            <div className="fixed inset-0 z-40 md:hidden" dir="rtl">
+              <button
+                type="button"
+                className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+                aria-label="بستن منو"
+                onClick={() => setMenuOpen(false)}
+              />
+              <nav className="absolute inset-y-0 end-0 flex w-[min(18rem,86vw)] flex-col border-s border-white/[0.08] bg-[#0d0f17] p-3 pt-4 shadow-2xl">
+                <div className="mb-3 flex items-center justify-between px-2">
+                  <span className="text-sm font-bold text-slate-100">منو</span>
+                  <button
+                    type="button"
+                    onClick={() => setMenuOpen(false)}
+                    className="rounded-lg p-1.5 text-slate-400 hover:bg-white/[0.06] hover:text-white"
+                    aria-label="بستن"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 space-y-1 overflow-y-auto">
               {navItems.map((item) => {
                 const Icon = item.icon
                 const split = 'badges' in item ? item.badges : null
@@ -151,6 +190,7 @@ export function Layout() {
                     key={item.to}
                     to={item.to}
                     end={item.end}
+                    onClick={() => setMenuOpen(false)}
                     className={({ isActive }) =>
                       `flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-lg ${
                         isActive
@@ -161,7 +201,7 @@ export function Layout() {
                   >
                     <Icon className="w-4 h-4 shrink-0 opacity-80" />
                     <span>{item.label}</span>
-                    {split && (split.newTasks > 0 || split.comments > 0) ? (
+                    {split && (split.newTasks > 0 || split.comments > 0 || (split.khadang ?? 0) > 0) ? (
                       <span className="flex items-center gap-1 ms-auto">
                         {split.newTasks > 0 ? (
                           <span className="min-w-4 px-1.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-mono font-bold">
@@ -173,20 +213,33 @@ export function Layout() {
                             {split.comments}
                           </span>
                         ) : null}
+                        {(split.khadang ?? 0) > 0 ? (
+                          <span title="خدنگ" className="min-w-4 px-1.5 rounded-full bg-teal-500 text-white text-[10px] font-mono font-bold">
+                            {split.khadang}
+                          </span>
+                        ) : null}
                       </span>
                     ) : null}
                     {'badge' in item && item.badge ? (
-                      <span className="ms-auto px-1.5 rounded-full bg-rose-500/15 text-rose-300 text-[10px] font-mono">
+                      <span
+                        className={`ms-auto min-w-4 px-1.5 rounded-full text-[10px] font-mono font-bold ${
+                          'badgeTone' in item && item.badgeTone === 'violet'
+                            ? 'bg-violet-500 text-white'
+                            : 'bg-rose-500/15 text-rose-300'
+                        }`}
+                      >
                         {item.badge}
                       </span>
                     ) : null}
                   </NavLink>
                 )
               })}
-              <div className="px-2 pt-1">
+              <div className="px-2 pt-2">
                 <PastDaysMenu />
               </div>
-            </nav>
+                </div>
+              </nav>
+            </div>
           ) : null}
 
           <nav className="hidden md:flex items-center gap-1 overflow-x-auto overflow-y-visible py-1.5 -mb-px border-t border-white/[0.05] no-scrollbar">
@@ -208,7 +261,7 @@ export function Layout() {
                 >
                   <Icon className="w-3.5 h-3.5 shrink-0 opacity-80" />
                   <span>{item.label}</span>
-                  {split && (split.newTasks > 0 || split.comments > 0) ? (
+                  {split && (split.newTasks > 0 || split.comments > 0 || (split.khadang ?? 0) > 0) ? (
                     <span className="flex items-center gap-1">
                       {split.newTasks > 0 ? (
                         <span
@@ -220,16 +273,30 @@ export function Layout() {
                       ) : null}
                       {split.comments > 0 ? (
                         <span
-                          title="نوتیف"
+                          title="کامنت"
                           className="min-w-4 px-1.5 py-0.2 rounded-full bg-sky-500 text-white border border-sky-300 text-[10px] font-mono font-bold"
                         >
                           {split.comments}
                         </span>
                       ) : null}
+                      {(split.khadang ?? 0) > 0 ? (
+                        <span
+                          title="خدنگ"
+                          className="min-w-4 px-1.5 py-0.2 rounded-full bg-teal-500 text-white border border-teal-300 text-[10px] font-mono font-bold"
+                        >
+                          {split.khadang}
+                        </span>
+                      ) : null}
                     </span>
                   ) : null}
                   {'badge' in item && item.badge !== null && item.badge !== undefined && (
-                    <span className="px-1.5 py-0.2 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 text-[10px] font-mono font-medium">
+                    <span
+                      className={`min-w-4 px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+                        'badgeTone' in item && item.badgeTone === 'violet'
+                          ? 'bg-violet-500 text-white border border-violet-300'
+                          : 'bg-rose-500/15 text-rose-300 border border-rose-500/30 font-medium'
+                      }`}
+                    >
                       {item.badge}
                     </span>
                   )}

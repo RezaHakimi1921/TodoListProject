@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { MessageCircle, TicketPlus, X } from 'lucide-react'
+import { Bell, MessageCircle, TicketPlus, X } from 'lucide-react'
 import {
   listNotifications,
   markNotificationRead,
-  markTaskNotificationsRead,
   TASK_NOTIFICATIONS_READ,
   type CommentNotification,
 } from '../api/notifications'
+import { isKhadangAgent } from '../api/jira'
 
 function isFreshNotification(item: CommentNotification) {
   const at = Date.parse(item.createdAt)
@@ -26,7 +26,8 @@ export function NotificationToasts() {
   const unreadQuery = useQuery({
     queryKey: ['notifications', 'unread-toast'],
     queryFn: () => listNotifications(true),
-    refetchInterval: 8000,
+    refetchInterval: 20_000,
+    staleTime: 8_000,
   })
 
   useEffect(() => {
@@ -74,10 +75,7 @@ export function NotificationToasts() {
 
   const openToast = (item: CommentNotification) => {
     dismissToast(item.id)
-    const marked = item.taskId
-      ? markTaskNotificationsRead(item.taskId)
-      : markNotificationRead(item.id)
-    void marked
+    void markNotificationRead(item.id)
       .then(() => queryClient.invalidateQueries({ queryKey: ['notifications'] }))
       .catch(() => undefined)
     if (item.taskId) navigate(`/tasks/${item.taskId}`)
@@ -89,13 +87,19 @@ export function NotificationToasts() {
     <div className="pointer-events-none fixed top-4 right-4 z-[80] flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
       {toasts.map((item) => {
         const isJiraTask = item.kind === 'new-task'
+        const isReminder = item.kind === 'reminder'
+        const isKhadang = !isJiraTask && !isReminder && isKhadangAgent(item.authorName)
         return (
           <div
             key={item.id}
             className={`pointer-events-auto overflow-hidden rounded-2xl border shadow-xl ${
               isJiraTask
                 ? 'border-amber-200 bg-amber-400 text-slate-950'
-                : 'border-sky-200 bg-sky-500 text-white'
+                : isReminder
+                  ? 'border-violet-200 bg-violet-700 text-white'
+                  : isKhadang
+                    ? 'border-teal-100 bg-teal-700 text-white'
+                    : 'border-sky-200 bg-sky-500 text-white'
             }`}
           >
             <button
@@ -105,11 +109,11 @@ export function NotificationToasts() {
             >
               <div className="flex items-start gap-2">
                 <span className={`mt-0.5 rounded-lg p-1 ${isJiraTask ? 'bg-black/10' : 'bg-white/15'}`}>
-                  {isJiraTask ? <TicketPlus className="w-4 h-4" /> : <MessageCircle className="w-4 h-4" />}
+                  {isJiraTask ? <TicketPlus className="w-4 h-4" /> : isReminder ? <Bell className="w-4 h-4" /> : <MessageCircle className="w-4 h-4" />}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-[11px] font-bold">
-                    {isJiraTask ? 'تسک جدید جیرا' : 'کامنت جدید'} · {item.jiraKey}
+                    {isJiraTask ? 'تسک جدید جیرا' : isReminder ? 'یادآوری' : isKhadang ? 'کامنت خدنگ' : 'کامنت جدید'} · {item.jiraKey}
                   </p>
                   <p className="mt-0.5 text-sm font-semibold leading-snug line-clamp-2">
                     {item.taskTitle || item.jiraKey}

@@ -31,6 +31,24 @@ public sealed class JiraController : ControllerBase
         return Ok(new[] { new { key = "SIP", name = "SIP" } });
     }
 
+    [HttpGet("users")]
+    public async Task<IActionResult> SearchUsers([FromQuery] string? projectKey, [FromQuery] string? q, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var key = string.IsNullOrWhiteSpace(projectKey) ? "PS" : projectKey.Trim();
+            return Ok(await _jiraRest.SearchAssignableUsersAsync(key, q, cancellationToken));
+        }
+        catch (JiraRestException)
+        {
+            return StatusCode(502, new { error = "خواندن کاربران جیرا انجام نشد" });
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(502, new { error = "خواندن کاربران جیرا انجام نشد" });
+        }
+    }
+
     [HttpGet("create-meta")]
     public async Task<IActionResult> CreateMeta(CancellationToken cancellationToken)
     {
@@ -243,7 +261,7 @@ public sealed class JiraController : ControllerBase
     {
         try
         {
-            await _jiraRest.AddIssueCommentAsync(key, request?.Body ?? string.Empty, cancellationToken);
+            await _jiraRest.AddIssueCommentAsync(key, request?.Body ?? string.Empty, request?.Internal ?? false, cancellationToken);
             return Ok(new { ok = true });
         }
         catch (ArgumentException ex)

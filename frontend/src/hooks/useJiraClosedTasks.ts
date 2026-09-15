@@ -13,7 +13,8 @@ export function useJiraClosedTasks() {
   const tasksQuery = useQuery({
     queryKey: ['jira-sync-tasks'],
     queryFn: () => listTasks(),
-    refetchInterval: 5_000,
+    refetchInterval: 45_000,
+    staleTime: 20_000,
   })
   const inFlight = useRef(false)
 

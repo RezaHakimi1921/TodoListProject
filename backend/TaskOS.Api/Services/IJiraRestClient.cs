@@ -83,7 +83,7 @@ public sealed class JiraWorklogItem
 
 public interface IJiraRestClient
 {
-    Task AddIssueCommentAsync(string jiraKey, string body, CancellationToken cancellationToken = default);
+    Task AddIssueCommentAsync(string jiraKey, string body, bool internalComment = false, CancellationToken cancellationToken = default);
     Task<bool> AssignToMeAsync(string jiraKey, CancellationToken cancellationToken = default);
     Task<JiraCreateMeta> GetSipCreateMetaAsync(CancellationToken cancellationToken = default);
     Task<JiraCreatedIssue> CreateSipIssueAsync(
@@ -101,4 +101,5 @@ public interface IJiraRestClient
     Task<IReadOnlyList<JiraIssueComments>> ListRecentlyUpdatedProductSupportAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JiraIssueComments>> SearchIssueCommentsAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JiraIssueState>> SearchIssueStatesAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<JiraUserOption>> SearchAssignableUsersAsync(string projectKey, string? query, CancellationToken cancellationToken = default);
 }

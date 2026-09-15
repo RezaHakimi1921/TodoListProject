@@ -14,13 +14,14 @@ import {
 
 interface Props {
   value: string
+  min?: string
   max?: string
   marked?: Set<string>
   compact?: boolean
   onChange: (iso: string) => void
 }
 
-export function JalaliMonthCalendar({ value, max, marked, compact, onChange }: Props) {
+export function JalaliMonthCalendar({ value, min, max, marked, compact, onChange }: Props) {
   const selected = isoToJalali(value)
   const [view, setView] = useState(selected)
 
@@ -80,7 +81,7 @@ export function JalaliMonthCalendar({ value, max, marked, compact, onChange }: P
         ))}
         {cells.map((cell, index) => {
           if (!cell) return <span key={`e-${index}`} />
-          const disabled = Boolean(max && cell.iso > max)
+          const disabled = Boolean((min && cell.iso < min) || (max && cell.iso > max))
           const isSelected = isIsoDate(value) && cell.iso === value
           const hasTasks = marked?.has(cell.iso)
           return (

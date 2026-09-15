@@ -35,6 +35,9 @@ public sealed class JiraCreateTaskRequest
 public sealed class AddJiraCommentRequest
 {
     public string Body { get; set; } = string.Empty;
+
+    /// <summary>When true, posts as Jira Service Desk internal (team-only) comment.</summary>
+    public bool Internal { get; set; }
 }
 
 public sealed class JiraSeenDto

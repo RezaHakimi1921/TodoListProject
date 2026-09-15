@@ -39,11 +39,8 @@ async function getPingMinutes() {
 }
 
 async function ensureAlarm() {
-  const minutes = await getPingMinutes()
-  const existing = await chrome.alarms.get(ALARM)
-  if (existing && existing.periodInMinutes === minutes) return
+  // Periodic work-log reminders are disabled; keep any leftover alarm cleared.
   await chrome.alarms.clear(ALARM)
-  await chrome.alarms.create(ALARM, { delayInMinutes: minutes, periodInMinutes: minutes })
 }
 
 async function ensureSyncAlarm() {
@@ -547,7 +544,6 @@ function boot() {
 
 chrome.runtime.onInstalled.addListener(() => {
   boot()
-  void showPing()
 })
 
 chrome.runtime.onStartup.addListener(() => {
@@ -608,8 +604,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     return
   }
   if (alarm.name !== ALARM) return
-  await showPing()
-  await ensureAlarm()
+  // Periodic reminders removed — ignore legacy alarm firings.
+  await chrome.alarms.clear(ALARM)
 })
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {

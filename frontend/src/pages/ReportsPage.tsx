@@ -31,7 +31,7 @@ export function ReportsPage() {
               <h1 className="text-base font-bold text-white">گزارش</h1>
             </div>
             <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
-              جمع کار، جلسه و نهار/استراحت همان روزی که از تقویم می‌گیری.
+              اول خلاصهٔ زمان هر تسک، بعد داستان همان روز از روی تقویم.
             </p>
           </div>
           <p className="text-[11px] font-medium text-slate-300">{formatPersianDate(selectedDate)}</p>
@@ -47,8 +47,8 @@ export function ReportsPage() {
         </div>
       </section>
 
+      <TodayWorkHoursCard date={selectedDate} />
       <DayWorkSummary date={selectedDate} />
-      <TodayWorkHoursCard />
       <TaskScatterCard />
     </div>
   )

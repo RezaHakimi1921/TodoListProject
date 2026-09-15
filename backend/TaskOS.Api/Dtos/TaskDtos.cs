@@ -22,6 +22,9 @@ public sealed class TaskDto
     public string? AssigneeName { get; set; }
     public string? AssigneeDisplay { get; set; }
     public bool Pinned { get; set; }
+    public string? NextReminderAt { get; set; }
+    public int ReminderCount { get; set; }
+    public int UnreadReminderCount { get; set; }
     public IReadOnlyList<ProblemLinkDto> Problems { get; set; } = [];
 }
 
@@ -53,6 +56,8 @@ public sealed class UpdateTaskStatusRequest
 public sealed class SetTaskPinRequest
 {
     public bool Pinned { get; set; }
+    public string? NextReminderAt { get; set; }
+    public int ReminderCount { get; set; }
 }
 
 public sealed class AddTimelineRequest

@@ -154,6 +154,8 @@ export interface JiraIssueComment {
   body: string
   created: string
   author?: JiraCommentAuthor
+  /** Jira Service Desk internal (team-only) vs shared with customer */
+  internal?: boolean
 }
 
 export interface JiraIssueThread {
@@ -173,31 +175,75 @@ function asJiraPerson(value: unknown): JiraCommentAuthor | null {
   return { name, displayName: row.displayName }
 }
 
+function commentIsInternal(row: {
+  properties?: Array<{ key?: string; value?: { internal?: boolean; allow?: boolean } }>
+}): boolean | undefined {
+  const props = Array.isArray(row.properties) ? row.properties : []
+  const publicFlag = props.find((p) => p?.key === 'sd.public.comment')
+  if (publicFlag && typeof publicFlag.value?.internal === 'boolean') {
+    return publicFlag.value.internal
+  }
+  // Portal / customer-visible comments often only carry sd.allow.public.comment
+  if (props.some((p) => p?.key === 'sd.allow.public.comment' && p?.value?.allow === true)) {
+    return false
+  }
+  return undefined
+}
+
 export function getJiraIssueThread(jiraKey: string) {
-  return fetch(
-    `/jira-rest/rest/api/2/issue/${encodeURIComponent(jiraKey)}?fields=description,created,comment,reporter,assignee,creator`,
-  ).then(async (response) => {
-    if (!response.ok) throw new Error('jira comments failed')
-    const data = await response.json()
-    const comments = Array.isArray(data?.fields?.comment?.comments) ? data.fields.comment.comments : []
+  const key = encodeURIComponent(jiraKey)
+  return Promise.all([
+    fetch(`/jira-rest/rest/api/2/issue/${key}?fields=description,created,reporter,assignee,creator`),
+    fetch(`/jira-rest/rest/api/2/issue/${key}/comment?expand=properties&maxResults=100`),
+  ]).then(async ([issueRes, commentsRes]) => {
+    if (!issueRes.ok || !commentsRes.ok) throw new Error('jira comments failed')
+    const data = await issueRes.json()
+    const commentsPayload = await commentsRes.json()
+    const comments = Array.isArray(commentsPayload?.comments) ? commentsPayload.comments : []
     return {
       reporter: asJiraPerson(data?.fields?.reporter),
       assignee: asJiraPerson(data?.fields?.assignee),
       creator: asJiraPerson(data?.fields?.creator),
       description: String(data?.fields?.description ?? ''),
       created: String(data?.fields?.created ?? ''),
-      comments: comments.map((row: { id?: string; body?: string; created?: string; author?: JiraCommentAuthor }) => ({
-        id: String(row.id ?? ''),
-        body: String(row.body ?? ''),
-        created: String(row.created ?? ''),
-        author: asJiraPerson(row.author) ?? undefined,
-      })),
+      comments: comments.map(
+        (row: {
+          id?: string
+          body?: string
+          created?: string
+          author?: JiraCommentAuthor
+          properties?: Array<{ key?: string; value?: { internal?: boolean; allow?: boolean } }>
+        }) => ({
+          id: String(row.id ?? ''),
+          body: String(row.body ?? ''),
+          created: String(row.created ?? ''),
+          author: asJiraPerson(row.author) ?? undefined,
+          internal: commentIsInternal(row),
+        }),
+      ),
     } as JiraIssueThread
   })
 }
 
-export function addJiraIssueComment(jiraKey: string, body: string) {
-  return api.post<{ ok: boolean }>(`/api/jira/issues/${encodeURIComponent(jiraKey)}/comments`, { body })
+export function addJiraIssueComment(jiraKey: string, body: string, options?: { internal?: boolean }) {
+  return api.post<{ ok: boolean }>(`/api/jira/issues/${encodeURIComponent(jiraKey)}/comments`, {
+    body,
+    internal: Boolean(options?.internal),
+  })
+}
+
+export function isKhadangAgent(
+  person?: { name?: string | null; displayName?: string | null } | string | null,
+) {
+  const raw =
+    typeof person === 'string'
+      ? person
+      : `${person?.name ?? ''} ${person?.displayName ?? ''}`
+  const value = raw.trim().toLowerCase()
+  return (
+    value.includes('khadang')
+    || value.includes('خدنگ')
+  )
 }
 
 export function isJiraMe(person?: JiraCommentAuthor | null) {
@@ -249,4 +295,17 @@ export function searchJiraIssueStatuses(keys: string[]) {
       })
     }),
   ).then((rows) => rows.flat())
+}
+
+export function searchJiraUsers(projectKey: string, q = '') {
+  const params = new URLSearchParams()
+  if (projectKey) params.set('projectKey', projectKey)
+  if (q.trim()) params.set('q', q.trim())
+  return api.get<JiraUserOption[]>(`/api/jira/users?${params.toString()}`)
+}
+
+export function jiraProjectKeyFromIssue(jiraKey?: string | null) {
+  const key = String(jiraKey || '').trim().toUpperCase()
+  const idx = key.indexOf('-')
+  return idx > 0 ? key.slice(0, idx) : 'PS'
 }

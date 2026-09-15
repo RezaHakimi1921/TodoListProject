@@ -49,6 +49,9 @@ export interface TaskItem {
   assigneeName?: string | null
   assigneeDisplay?: string | null
   pinned?: boolean
+  nextReminderAt?: string | null
+  reminderCount?: number
+  unreadReminderCount?: number
   problems?: ProblemLink[]
 }
 

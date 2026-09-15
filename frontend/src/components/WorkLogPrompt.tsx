@@ -1,15 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Bell, ClipboardList, HelpCircle, Power } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Bell, ClipboardList, HelpCircle } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createProblem, listProblems } from '../api/problems'
 import { createTask, getTask, listTasks, updateTaskStatus } from '../api/tasks'
 import { clearFocus, finishFocus, getFocus, setFocus, tickFocus } from '../api/focus'
 import { captureWorkLog } from '../api/workLogs'
-import { ackPing, DEFAULT_PING_MINUTES, getSettings, saveSettings, testToast } from '../api/settings'
+import { ackPing, testToast } from '../api/settings'
 import { PROBLEM_STATUS_LABEL, STATUS_LABEL, type Problem, type TaskItem, type WorkLogSource } from '../types'
-import { minutesUntilPing } from '../lib/notify'
 
-const CHECK_MS = 15_000
 const MINUTE_CHIPS = [5, 10, 15, 20, 30, 45, 60]
 const BREAK_TYPES = ['استراحت', 'چای / قهوه', 'ناهار / غذا', 'انتظار / وقفه']
 
@@ -43,11 +41,7 @@ function samePick(a: WorkPick | null, b: WorkPick) {
 
 export function WorkLogPrompt() {
   const queryClient = useQueryClient()
-  const settingsQuery = useQuery({ queryKey: ['settings'], queryFn: getSettings, refetchInterval: 15_000 })
-  const pingMinutes = settingsQuery.data?.pingMinutes ?? DEFAULT_PING_MINUTES
-  const lastPingAt = settingsQuery.data?.lastPingAt ?? null
   const [open, setOpen] = useState(false)
-  const [paused, setPaused] = useState(false)
   const [queryText, setQueryText] = useState('')
   const [minutes, setMinutes] = useState<number | null>(null)
   const [picked, setPicked] = useState<WorkPick | null>(null)
@@ -56,8 +50,6 @@ export function WorkLogPrompt() {
   const [mode, setMode] = useState<Mode>('log')
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [error, setError] = useState('')
-  const [eta, setEta] = useState(() => minutesUntilPing(pingMinutes, lastPingAt))
-  const dueNotifiedAt = useRef<string | null>(null)
 
   const focusQuery = useQuery({ queryKey: ['focus'], queryFn: getFocus, refetchInterval: 30_000 })
   const focusTaskQuery = useQuery({
@@ -99,19 +91,8 @@ export function WorkLogPrompt() {
   const canBreak = Boolean(picked?.kind === 'break' && minutes && minutes > 0)
   const canSubmit = Boolean(picked && picked.kind !== 'break' && minutes && minutes > 0)
 
-  useEffect(() => {
-    if (settingsQuery.data) setPaused(settingsQuery.data.paused)
-  }, [settingsQuery.data])
-
   const bumpPing = () => {
     void ackPing().then(() => queryClient.invalidateQueries({ queryKey: ['settings'] }))
-  }
-
-  const setPausedAndSave = (next: boolean) => {
-    setPaused(next)
-    void saveSettings({ pingMinutes, paused: next }).then((saved) => {
-      void queryClient.setQueryData(['settings'], saved)
-    })
   }
 
   const resetPicks = () => {
@@ -129,21 +110,6 @@ export function WorkLogPrompt() {
     setMode(nextMode ?? 'log')
     setOpen(true)
   }
-
-  useEffect(() => {
-    const tick = () => setEta(minutesUntilPing(pingMinutes, lastPingAt))
-    tick()
-    const timer = window.setInterval(tick, CHECK_MS)
-    return () => window.clearInterval(timer)
-  }, [pingMinutes, lastPingAt])
-
-  useEffect(() => {
-    if (paused || !lastPingAt || eta > 0) return
-    if (dueNotifiedAt.current === lastPingAt) return
-    dueNotifiedAt.current = lastPingAt
-    openPrompt('Timer')
-    void testToast().catch(() => undefined)
-  }, [eta, paused, lastPingAt])
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ['focus'] })
@@ -293,16 +259,6 @@ export function WorkLogPrompt() {
         </button>
         <button
           type="button"
-          onClick={() => setPausedAndSave(!paused)}
-          className={`work-dock-ping inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm font-semibold shadow-lg ${
-            paused ? 'is-off' : 'is-on'
-          }`}
-        >
-          <Power className="h-4 w-4" />
-          {paused ? 'یادآوری خاموش' : 'یادآوری روشن'}
-        </button>
-        <button
-          type="button"
           onClick={() => {
             void testToast().then(() => {
               void queryClient.invalidateQueries({ queryKey: ['settings'] })
@@ -313,9 +269,6 @@ export function WorkLogPrompt() {
           <Bell className="h-4 w-4" />
           تست نوتیف
         </button>
-        <span className={`work-dock-eta self-center rounded-full px-3 py-1.5 text-xs font-medium ${paused ? 'is-off' : ''}`}>
-          {paused ? 'یادآوری‌ها قطع است' : `هر ${pingMinutes} دقیقه · بعدی ${eta} دقیقه`}
-        </span>
       </div>
 
       {open && (
@@ -530,14 +483,10 @@ export function WorkLogPrompt() {
               )}
               <button
                 type="button"
-                onClick={() => {
-                  bumpPing()
-                  setPausedAndSave(true)
-                  setOpen(false)
-                }}
+                onClick={() => setOpen(false)}
                 className="rounded-2xl px-4 py-2 text-sm text-paper/50"
               >
-                سیستم را خاموش کن
+                بستن
               </button>
             </div>
           </div>

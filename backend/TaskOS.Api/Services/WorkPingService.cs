@@ -42,12 +42,13 @@ public sealed class WorkPingService : IWorkPingService
     public async Task<bool> TryNotifyAsync(bool force, CancellationToken cancellationToken = default)
     {
         var settings = await _settings.GetAsync();
-        if (settings.Paused || await _settings.IsRestingAsync())
+        // Periodic reminders are disabled; only explicit test/force may notify.
+        if (!force)
         {
             return false;
         }
 
-        if (!force && !IsDue(settings))
+        if (await _settings.IsRestingAsync())
         {
             return false;
         }

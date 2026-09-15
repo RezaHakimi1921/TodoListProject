@@ -8,12 +8,23 @@ interface Props {
   value: string
   onChange: (iso: string) => void
   placeholder?: string
+  min?: string
+  max?: string
+  /** Portal stacking — raise above modals (default 80) */
+  zIndex?: number
 }
 
 const PANEL_WIDTH = 248
 const PANEL_HEIGHT = 230
 
-export function JalaliDateField({ value, onChange, placeholder = 'انتخاب تاریخ' }: Props) {
+export function JalaliDateField({
+  value,
+  onChange,
+  placeholder = 'انتخاب تاریخ',
+  min,
+  max,
+  zIndex = 80,
+}: Props) {
   const [open, setOpen] = useState(false)
   const [coords, setCoords] = useState({ top: 0, left: 0 })
   const box = useRef<HTMLDivElement>(null)
@@ -59,7 +70,10 @@ export function JalaliDateField({ value, onChange, placeholder = 'انتخاب �
         <button
           ref={button}
           type="button"
-          onClick={() => setOpen((current) => !current)}
+          onClick={(event) => {
+            event.stopPropagation()
+            setOpen((current) => !current)
+          }}
           className="flex min-h-[2.25rem] w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/30 px-3 py-2 text-right text-xs text-slate-100 hover:border-amber-400/30"
         >
           <span className={value ? 'text-slate-100' : 'text-slate-500'}>
@@ -71,7 +85,8 @@ export function JalaliDateField({ value, onChange, placeholder = 'انتخاب �
           <button
             type="button"
             title="پاک کردن تاریخ"
-            onClick={() => {
+            onClick={(event) => {
+              event.stopPropagation()
               onChange('')
               setOpen(false)
             }}
@@ -85,12 +100,16 @@ export function JalaliDateField({ value, onChange, placeholder = 'انتخاب �
         ? createPortal(
             <div
               ref={panel}
-              className="fixed z-[80] w-[15.5rem] rounded-xl border border-white/10 bg-[#10131b] p-2 shadow-2xl"
-              style={{ top: coords.top, left: coords.left }}
+              className="fixed w-[15.5rem] rounded-xl border border-white/10 bg-[#10131b] p-2 shadow-2xl"
+              style={{ top: coords.top, left: coords.left, zIndex }}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
             >
               <JalaliMonthCalendar
                 compact
                 value={value}
+                min={min}
+                max={max}
                 onChange={(iso) => {
                   onChange(iso)
                   setOpen(false)

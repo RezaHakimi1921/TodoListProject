@@ -422,9 +422,9 @@ function PendingSwitchLine({
   const seconds = pending.remainingSeconds
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <p className="text-[12px] leading-relaxed text-amber-100/90">
+      <p className="pending-switch-msg text-[12px] leading-relaxed">
         {seconds > 0 ? `${seconds} ثانیه دیگه به «${pending.title}» منتقل می‌شی` : `الان به «${pending.title}» منتقل می‌شی`}
-        <span className="ms-1 text-[10px] text-amber-200/60">{pending.jiraKey}</span>
+        <span className="pending-switch-key ms-1 text-[10px]">{pending.jiraKey}</span>
       </p>
       <button
         type="button"
@@ -438,7 +438,7 @@ function PendingSwitchLine({
         type="button"
         disabled={transferring || holding}
         onClick={onHold}
-        className="rounded-lg border border-white/20 bg-black/30 hover:bg-black/50 disabled:opacity-60 text-white text-[11px] font-bold px-2.5 py-1"
+        className="pending-switch-hold rounded-lg border border-white/20 bg-black/30 hover:bg-black/50 disabled:opacity-60 text-white text-[11px] font-bold px-2.5 py-1"
       >
         عدم انتقال
       </button>

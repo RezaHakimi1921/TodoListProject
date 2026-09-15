@@ -43,14 +43,53 @@ public sealed class JiraCommentInboxRepository : IJiraCommentInboxRepository
             "SELECT COUNT(*) FROM JiraCommentInbox WHERE SeenAt IS NULL");
     }
 
-    public async Task<(int NewTasks, int Comments)> CountUnreadByKindAsync()
+    public async Task<(int NewTasks, int Comments, int Khadang, int Reminders)> CountUnreadByKindAsync()
     {
         using var connection = _factory.Create();
         var newTasks = await connection.ExecuteScalarAsync<int>(
             "SELECT COUNT(*) FROM JiraCommentInbox WHERE SeenAt IS NULL AND CommentId LIKE 'new-task:%'");
+        var reminders = await connection.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM JiraCommentInbox WHERE SeenAt IS NULL AND CommentId LIKE 'reminder:%'");
+        // Khadang AI agent comments — match author name/display containing khadang / خدنگ
+        const string khadangFilter = """
+            CommentId NOT LIKE 'new-task:%'
+            AND CommentId NOT LIKE 'reminder:%'
+            AND (
+                lower(ifnull(AuthorName, '')) LIKE '%khadang%'
+                OR ifnull(AuthorName, '') LIKE '%خدنگ%'
+            )
+            """;
+        var khadang = await connection.ExecuteScalarAsync<int>(
+            $"SELECT COUNT(*) FROM JiraCommentInbox WHERE SeenAt IS NULL AND {khadangFilter}");
         var comments = await connection.ExecuteScalarAsync<int>(
-            "SELECT COUNT(*) FROM JiraCommentInbox WHERE SeenAt IS NULL AND CommentId NOT LIKE 'new-task:%'");
-        return (newTasks, comments);
+            """
+            SELECT COUNT(*) FROM JiraCommentInbox
+            WHERE SeenAt IS NULL
+              AND CommentId NOT LIKE 'new-task:%'
+              AND CommentId NOT LIKE 'reminder:%'
+              AND NOT (
+                lower(ifnull(AuthorName, '')) LIKE '%khadang%'
+                OR ifnull(AuthorName, '') LIKE '%خدنگ%'
+              )
+            """);
+        return (newTasks, comments, khadang, reminders);
+    }
+
+    public async Task<IReadOnlyDictionary<int, int>> UnreadReminderCountsByTaskIdsAsync(IReadOnlyList<int> taskIds)
+    {
+        if (taskIds.Count == 0) return new Dictionary<int, int>();
+        using var connection = _factory.Create();
+        var rows = await connection.QueryAsync<(int TaskId, int Count)>(
+            """
+            SELECT TaskId, COUNT(*) AS Count
+            FROM JiraCommentInbox
+            WHERE SeenAt IS NULL
+              AND CommentId LIKE 'reminder:%'
+              AND TaskId IN @TaskIds
+            GROUP BY TaskId
+            """,
+            new { TaskIds = taskIds.ToArray() });
+        return rows.ToDictionary(r => r.TaskId, r => r.Count);
     }
 
     public async Task<bool> InsertIfNewAsync(JiraCommentInboxEntry entry)
@@ -119,6 +158,33 @@ public sealed class JiraCommentInboxRepository : IJiraCommentInboxRepository
         await connection.ExecuteAsync(
             "UPDATE JiraCommentInbox SET SeenAt = @SeenAt WHERE TaskId = @TaskId AND SeenAt IS NULL",
             new { TaskId = taskId, SeenAt = seenAt });
+    }
+
+    public async Task MarkReadRemindersByTaskAsync(int taskId, string seenAt)
+    {
+        using var connection = _factory.Create();
+        await connection.ExecuteAsync(
+            """
+            UPDATE JiraCommentInbox
+            SET SeenAt = @SeenAt
+            WHERE TaskId = @TaskId
+              AND SeenAt IS NULL
+              AND CommentId LIKE 'reminder:%'
+            """,
+            new { TaskId = taskId, SeenAt = seenAt });
+    }
+
+    public async Task MarkAllRemindersReadAsync(string seenAt)
+    {
+        using var connection = _factory.Create();
+        await connection.ExecuteAsync(
+            """
+            UPDATE JiraCommentInbox
+            SET SeenAt = @SeenAt
+            WHERE SeenAt IS NULL
+              AND CommentId LIKE 'reminder:%'
+            """,
+            new { SeenAt = seenAt });
     }
 
     public async Task MarkReadByJiraKeyAsync(string jiraKey, string seenAt)

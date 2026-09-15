@@ -27,7 +27,10 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
 
     public Task<int> CountUnreadAsync() => _inbox.CountUnreadAsync();
 
-    public Task<(int NewTasks, int Comments)> CountUnreadByKindAsync() => _inbox.CountUnreadByKindAsync();
+    public Task<(int NewTasks, int Comments, int Khadang, int Reminders)> CountUnreadByKindAsync() => _inbox.CountUnreadByKindAsync();
+
+    public Task<IReadOnlyDictionary<int, int>> UnreadReminderCountsByTaskIdsAsync(IReadOnlyList<int> taskIds) =>
+        _inbox.UnreadReminderCountsByTaskIdsAsync(taskIds);
 
     public async Task<bool> AddIncomingAsync(
         int taskId,
@@ -35,7 +38,8 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
         string commentId,
         string authorName,
         string body,
-        string createdAt)
+        string createdAt,
+        bool sendPush = true)
     {
         var inserted = await _inbox.InsertIfNewAsync(new JiraCommentInboxEntry
         {
@@ -47,7 +51,7 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
             CreatedAt = string.IsNullOrWhiteSpace(createdAt) ? TaskMapping.Now() : createdAt.Trim(),
             ReceivedAt = TaskMapping.Now()
         });
-        if (inserted)
+        if (inserted && sendPush)
         {
             var who = string.IsNullOrWhiteSpace(authorName) ? "کسی" : authorName.Trim();
             await SafePush($"{who} روی {jiraKey.Trim().ToUpperInvariant()}", TrimBody(body), $"/tasks/{taskId}");
@@ -92,6 +96,12 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
     public Task MarkReadByTaskAsync(int taskId) =>
         _inbox.MarkReadByTaskAsync(taskId, TaskMapping.Now());
 
+    public Task MarkReadRemindersByTaskAsync(int taskId) =>
+        _inbox.MarkReadRemindersByTaskAsync(taskId, TaskMapping.Now());
+
+    public Task MarkAllRemindersReadAsync() =>
+        _inbox.MarkAllRemindersReadAsync(TaskMapping.Now());
+
     public Task MarkReadByJiraKeyAsync(string jiraKey) =>
         _inbox.MarkReadByJiraKeyAsync(jiraKey, TaskMapping.Now());
 
@@ -99,7 +109,7 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
     {
         Id = entry.Id,
         TaskId = entry.TaskId,
-        Kind = IsNewTask(entry.CommentId) ? "new-task" : "comment",
+        Kind = IsReminder(entry.CommentId) ? "reminder" : IsNewTask(entry.CommentId) ? "new-task" : "comment",
         TaskTitle = entry.TaskTitle,
         TaskStatus = entry.TaskStatus,
         JiraKey = entry.JiraKey,
@@ -110,6 +120,9 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
         CreatedAt = entry.CreatedAt,
         Read = !string.IsNullOrWhiteSpace(entry.SeenAt)
     };
+
+    private static bool IsReminder(string? commentId) =>
+        (commentId ?? string.Empty).StartsWith("reminder:", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsNewTask(string? commentId) =>
         (commentId ?? string.Empty).StartsWith("new-task:", StringComparison.OrdinalIgnoreCase);

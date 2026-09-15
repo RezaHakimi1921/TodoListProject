@@ -12,17 +12,19 @@ public sealed class TaskService : ITaskService
     private readonly ITaskChecklistService _checklist;
     private readonly IJiraCommentInboxService _inbox;
     private readonly IProblemRepository _problems;
+    private readonly ITaskReminderService _reminders;
     private readonly IServiceScopeFactory _scopes;
     private readonly int _agingDays;
     private readonly double _similarityThreshold;
 
-    public TaskService(ITaskRepository tasks, ITaskJiraRepository jira, ITaskChecklistService checklist, IJiraCommentInboxService inbox, IProblemRepository problems, IServiceScopeFactory scopes, IConfiguration configuration)
+    public TaskService(ITaskRepository tasks, ITaskJiraRepository jira, ITaskChecklistService checklist, IJiraCommentInboxService inbox, IProblemRepository problems, ITaskReminderService reminders, IServiceScopeFactory scopes, IConfiguration configuration)
     {
         _tasks = tasks;
         _jira = jira;
         _checklist = checklist;
         _inbox = inbox;
         _problems = problems;
+        _reminders = reminders;
         _scopes = scopes;
         _agingDays = configuration.GetValue("TaskOS:AgingDays", 3);
         _similarityThreshold = configuration.GetValue("TaskOS:SimilarityThreshold", 0.6);
@@ -35,6 +37,7 @@ public sealed class TaskService : ITaskService
         await _checklist.AttachCountsAsync(dtos);
         await AttachJiraAsync(dtos);
         await AttachProblemsAsync(dtos);
+        await _reminders.AttachAsync(dtos);
         return dtos;
     }
 
@@ -282,6 +285,7 @@ public sealed class TaskService : ITaskService
         var rows = await _tasks.ListRelatedToDateAsync(logDate);
         var dtos = rows.Select(r => TaskMapping.ToDto(r, _agingDays)).ToList();
         await AttachJiraAsync(dtos);
+        await _reminders.AttachAsync(dtos);
         return dtos;
     }
 
@@ -307,6 +311,7 @@ public sealed class TaskService : ITaskService
         await _checklist.AttachCountsAsync([dto]);
         await AttachJiraAsync([dto]);
         await AttachProblemsAsync([dto]);
+        await _reminders.AttachAsync([dto]);
         return dto;
     }
 

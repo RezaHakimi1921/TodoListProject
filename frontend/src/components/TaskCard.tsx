@@ -13,7 +13,8 @@ import {
   ChevronDown,
   RotateCcw,
   ExternalLink,
-  Pin
+  Pin,
+  Bell
 } from 'lucide-react'
 import { finishFocus, getFocus } from '../api/focus'
 import { deleteTask, setTaskPinned, updateTask, updateTaskStatus } from '../api/tasks'
@@ -31,14 +32,18 @@ interface Props {
   task: TaskItem
   onOpenDrawer: (task: TaskItem) => void
   onOpenAging: (task: TaskItem) => void
+  onOpenReminder?: (task: TaskItem) => void
 }
 
-export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
+export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Props) {
   const queryClient = useQueryClient()
   const askTrash = useTrashConfirm()
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [statusError, setStatusError] = useState('')
   const pinned = Boolean(task.pinned)
+  const hasReminder = (task.reminderCount ?? 0) > 0 || Boolean(task.nextReminderAt)
+  const unreadReminders = task.unreadReminderCount ?? 0
+  const hasUnreadReminder = unreadReminders > 0
 
   useEffect(() => {
     if (!showStatusMenu) return
@@ -132,6 +137,8 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
       } ${
         pinned
           ? 'border-amber-400/70 bg-amber-400/[0.08] shadow-lg shadow-amber-950/30 hover:-translate-y-1 hover:border-amber-300'
+          : hasUnreadReminder
+          ? 'border-violet-400/70 bg-violet-500/[0.1] shadow-md shadow-violet-950/25 hover:-translate-y-0.5 hover:border-violet-300'
           : isDone
           ? 'border-white/[0.04] bg-black/20 opacity-55 hover:opacity-80'
           : isDoing
@@ -177,6 +184,18 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-100 border border-amber-300/40">
                 <Pin className="w-3 h-3 fill-amber-300" />
                 اولویت دارد
+              </span>
+            ) : null}
+
+            {hasUnreadReminder ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-500/25 text-violet-50 border border-violet-300/50">
+                <Bell className="w-3 h-3" />
+                {unreadReminders} یادآوری ندیده‌شده
+              </span>
+            ) : hasReminder ? (
+              <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-200/80 border border-violet-500/20">
+                <Bell className="w-3 h-3" />
+                یادآوری زمان‌بندی‌شده
               </span>
             ) : null}
 
@@ -306,6 +325,27 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging }: Props) {
         </div>
 
         <div className="flex items-center gap-0.5 shrink-0">
+          <button
+            id={`btn-reminder-task-${task.id}`}
+            type="button"
+            onClick={() => onOpenReminder?.(task)}
+            className={`relative p-1.5 rounded-lg transition-all min-w-8 ${
+              hasUnreadReminder
+                ? 'opacity-100 text-violet-100 bg-violet-500/30 hover:bg-violet-500/40'
+                : hasReminder
+                ? 'opacity-100 text-violet-300 bg-violet-500/15 hover:bg-violet-500/25'
+                : 'opacity-100 text-slate-400 hover:text-violet-300 hover:bg-white/[0.06] md:opacity-0 md:-translate-y-1 md:group-hover:opacity-100 md:group-hover:translate-y-0'
+            }`}
+            title={hasUnreadReminder ? `${unreadReminders} یادآوری ندیده‌شده` : 'یادآوری'}
+          >
+            <Bell className={`w-3.5 h-3.5 ${hasUnreadReminder || hasReminder ? 'fill-violet-300/30' : ''}`} />
+            {hasUnreadReminder ? (
+              <span className="absolute -top-1 -left-1 min-w-4 h-4 px-0.5 rounded-full bg-violet-500 text-white text-[9px] font-mono font-bold flex items-center justify-center border border-violet-200/40">
+                {unreadReminders > 9 ? '9+' : unreadReminders}
+              </span>
+            ) : null}
+          </button>
+
           <button
             id={`btn-pin-task-${task.id}`}
             type="button"

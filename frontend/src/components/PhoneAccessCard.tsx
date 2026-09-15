@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Bell, Copy, ExternalLink, Smartphone } from 'lucide-react'
+import { Bell, Bookmark, Copy, ExternalLink, Smartphone } from 'lucide-react'
 import { api } from '../api/client'
 import { sendTestPhonePush } from '../lib/phonePush'
 
 type PhoneNotify = { ntfyTopic?: string; ntfyUrl?: string; phoneBaseUrl?: string }
+type LanInfo = { urls?: string[]; stable?: string; host?: string }
+
+const FALLBACK_STABLE = 'http://reza.local:5173'
 
 export function PhoneAccessCard() {
   const [urls, setUrls] = useState<string[]>([])
+  const [stable, setStable] = useState(FALLBACK_STABLE)
   const [copied, setCopied] = useState('')
   const [topic, setTopic] = useState('')
   const [ntfyUrl, setNtfyUrl] = useState('')
@@ -16,16 +20,26 @@ export function PhoneAccessCard() {
   useEffect(() => {
     void fetch('/__lan')
       .then((res) => (res.ok ? res.json() : { urls: [] }))
-      .then((data: { urls?: string[] }) => {
+      .then((data: LanInfo) => {
+        const stableUrl = data.stable || FALLBACK_STABLE
+        setStable(stableUrl)
         const list = rankLanUrls(Array.isArray(data.urls) ? data.urls : [])
+          .filter((url) => !url.includes('.local'))
         const here = window.location.origin
-        if (here && !here.includes('127.0.0.1') && !here.includes('localhost') && !list.includes(here)) {
+        if (
+          here
+          && !here.includes('127.0.0.1')
+          && !here.includes('localhost')
+          && !here.includes('.local')
+          && !list.includes(here)
+        ) {
           list.unshift(here)
         }
         setUrls(list)
       })
       .catch(() => {
         const here = window.location.origin
+        setStable(FALLBACK_STABLE)
         setUrls(here.includes('127.0.0.1') || here.includes('localhost') ? [] : [here])
       })
   }, [])
@@ -40,11 +54,8 @@ export function PhoneAccessCard() {
   }, [])
 
   useEffect(() => {
-    const here = window.location.origin
-    const base =
-      here && !here.includes('127.0.0.1') && !here.includes('localhost')
-        ? here
-        : urls[0]
+    // Keep ntfy deep-link on a concrete LAN IP; bookmark uses taskos.local.
+    const base = urls[0]
     if (!base) return
     void api
       .put<PhoneNotify>('/api/push/phone', { phoneBaseUrl: base, ntfyTopic: topic || undefined })
@@ -77,7 +88,7 @@ export function PhoneAccessCard() {
     }
   }
 
-  const primary = urls[0]
+  const primaryIp = urls[0]
 
   return (
     <div id="phone" className="p-3.5 rounded-2xl bg-[#0f121a] border border-slate-800 space-y-2">
@@ -86,34 +97,62 @@ export function PhoneAccessCard() {
         آیفون و شبکه محلی
       </span>
       <p className="text-slate-400 text-[11px] leading-relaxed">
-        Safari روی آیفون گواهی HTTPS محلی را باز نمی‌کند و Web Push هم دامنهٔ عمومی می‌خواهد.
-        برنامه را با HTTP همین یک پورت باز کن؛ نوتیف قفل‌صفحه از ntfy می‌آید. ضربه روی نوتیف Safari را روی همان تسک TaskOS باز می‌کند.
+        به‌جای IP، همین آدرس ثابت را بوکمارک کن. با mDNS روی شبکهٔ محلی می‌ماند؛ اگر IP عوض شود لازم نیست دوباره چیزی حفظ کنی.
+        گوشی و لپ‌تاپ باید روی یک وای‌فای باشند.
       </p>
-      {primary ? (
+
+      <div className="rounded-xl border border-amber-400/25 bg-amber-400/10 p-2.5 space-y-1.5">
+        <p className="text-[11px] font-bold text-amber-100 inline-flex items-center gap-1.5">
+          <Bookmark className="h-3.5 w-3.5" />
+          آدرس ثابت (بوکمارک همین)
+        </p>
         <div className="flex items-center gap-2">
-          <code className="min-w-0 flex-1 truncate rounded-lg bg-black/30 px-2 py-1 font-mono text-[11px] text-sky-200">
-            {primary}
+          <code className="min-w-0 flex-1 truncate rounded-lg bg-black/30 px-2 py-1 font-mono text-[11px] text-amber-100">
+            {stable}
           </code>
           <button
             type="button"
-            onClick={() => void copy(primary)}
+            onClick={() => void copy(stable)}
             className="rounded-lg border border-white/10 px-2 py-1 text-[10px] text-slate-300 hover:bg-white/[0.04]"
           >
-            {copied === primary ? 'کپی شد' : <Copy className="h-3 w-3" />}
+            {copied === stable ? 'کپی شد' : <Copy className="h-3 w-3" />}
           </button>
+        </div>
+        <p className="text-[10px] text-amber-100/70">
+          اول http://taskos.local:5173 را امتحان کن. اگر DNS نگرفت، http://reza.local:5173 یا IP فعلی. روی آیفون باید روی همان وای‌فای باشی.
+        </p>
+      </div>
+
+      {primaryIp ? (
+        <div className="space-y-1">
+          <p className="text-[10px] font-semibold text-slate-500">IP فعلی (پشتیبان)</p>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-lg bg-black/30 px-2 py-1 font-mono text-[11px] text-sky-200">
+              {primaryIp}
+            </code>
+            <button
+              type="button"
+              onClick={() => void copy(primaryIp)}
+              className="rounded-lg border border-white/10 px-2 py-1 text-[10px] text-slate-300 hover:bg-white/[0.04]"
+            >
+              {copied === primaryIp ? 'کپی شد' : <Copy className="h-3 w-3" />}
+            </button>
+          </div>
         </div>
       ) : (
         <p className="text-[11px] text-amber-200">آدرس شبکه هنوز آماده نیست. TaskOS UI را دوباره اجرا کن.</p>
       )}
       {urls.length > 1 ? (
         <p className="text-[10px] text-slate-500">
-          اگر این IP باز نشد، بقیه کارت‌های شبکه:{' '}
-          {urls.slice(1).join(' · ')}
+          بقیه کارت‌ها: {urls.slice(1).join(' · ')}
         </p>
       ) : null}
 
       <div className="rounded-xl border border-white/10 bg-black/20 p-2.5 space-y-1.5">
-        <p className="text-[11px] font-bold text-slate-200">نوتیف آیفون با ntfy</p>
+        <p className="text-[11px] font-bold text-slate-200">اگر IP عوض شد → نوتیف ntfy</p>
+        <p className="text-[11px] text-slate-400 leading-relaxed">
+          وقتی IP شبکه عوض شود، لپ‌تاپ خودش لینک جدید را به ntfy می‌فرستد. یک‌بار Subscribe کن و تمام.
+        </p>
         <ol className="text-[11px] text-slate-400 leading-relaxed list-decimal pr-4 space-y-1">
           <li>
             از اپ‌استور{' '}
@@ -169,9 +208,17 @@ export function PhoneAccessCard() {
 
 function rankLanUrls(urls: string[]) {
   const score = (url: string) => {
-    if (url.includes('192.168.40.')) return 0
+    if (url.includes('reza.local') || url.includes('taskos.local')) return -1
+    if (url.includes('192.168.140.') || url.includes('192.168.40.')) return 0
     if (url.includes('192.168.1.') || url.includes('192.168.0.')) return 1
-    if (url.includes('192.168.56.') || url.includes('192.168.239.') || url.includes('192.168.85.')) return 8
+    if (
+      url.includes('192.168.56.')
+      || url.includes('192.168.239.')
+      || url.includes('192.168.85.')
+      || url.includes('169.254.')
+    ) {
+      return 8
+    }
     return 4
   }
   return [...urls].sort((a, b) => score(a) - score(b))

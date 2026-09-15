@@ -11,55 +11,80 @@ export class ApiError extends Error {
 }
 
 let backendAvailable: boolean | null = null
+let backendProbe: Promise<boolean> | null = null
 
-async function checkBackend(): Promise<boolean> {
+async function probeBackend(): Promise<boolean> {
   if (backendAvailable === true) return true
-  try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 4000)
-    let res = await fetch('/api/health', { signal: controller.signal })
-    if (res.status === 404) {
-      res = await fetch('/api/settings', { signal: controller.signal })
+  if (backendProbe) return backendProbe
+  backendProbe = (async () => {
+    try {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 1500)
+      let res = await fetch('/api/health', { signal: controller.signal })
+      if (res.status === 404) {
+        res = await fetch('/api/settings', { signal: controller.signal })
+      }
+      clearTimeout(timeout)
+      backendAvailable = res.ok
+      return backendAvailable
+    } catch {
+      backendAvailable = false
+      return false
+    } finally {
+      backendProbe = null
     }
-    clearTimeout(timeout)
-    backendAvailable = res.ok
-    return backendAvailable
-  } catch {
-    backendAvailable = false
-    return false
-  }
+  })()
+  return backendProbe
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isPingTest = path.includes('/api/settings/test-toast')
-  const isAvailable = await checkBackend()
-  if (isAvailable) {
-    try {
-      const response = await fetch(path, {
-        headers: {
-          'Content-Type': 'application/json',
-          ...(init?.headers ?? {}),
-        },
-        ...init,
-      })
-      if (response.status === 204) {
-        return undefined as T
-      }
-      const text = await response.text()
-      const data = text ? JSON.parse(text) : null
-      if (!response.ok) {
-        throw new ApiError(data?.error ?? `Request failed (${response.status})`, response.status)
-      }
-      return data as T
-    } catch (err) {
-      if (err instanceof ApiError) throw err
-      if (isPingTest) {
-        throw new ApiError('فرم ویندوز ارسال نشد. API را روی پورت 5088 چک کن.', 503)
-      }
+  // Prefer the real request first so cold load is not blocked by a health RTT.
+  try {
+    const response = await fetch(path, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    })
+    backendAvailable = true
+    if (response.status === 204) {
+      return undefined as T
     }
+    const text = await response.text()
+    const data = text ? JSON.parse(text) : null
+    if (!response.ok) {
+      throw new ApiError(data?.error ?? `Request failed (${response.status})`, response.status)
+    }
+    return data as T
+  } catch (err) {
+    if (err instanceof ApiError) throw err
+    if (isPingTest) {
+      throw new ApiError('فرم ویندوز ارسال نشد. API را روی پورت 5088 چک کن.', 503)
+    }
+    const up = await probeBackend()
+    if (!up) {
+      throw new ApiError('API در دسترس نیست. TaskOS.Api را با آدرس http://127.0.0.1:5088 اجرا کن.', 503)
+    }
+    // One retry after a transient network blip.
+    const response = await fetch(path, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+      ...init,
+    })
+    if (response.status === 204) {
+      return undefined as T
+    }
+    const text = await response.text()
+    const data = text ? JSON.parse(text) : null
+    if (!response.ok) {
+      throw new ApiError(data?.error ?? `Request failed (${response.status})`, response.status)
+    }
+    return data as T
   }
-
-  throw new ApiError('API در دسترس نیست. TaskOS.Api را با آدرس http://127.0.0.1:5088 اجرا کن.', 503)
 }
 
 function handleLocalMock<T>(path: string, init?: RequestInit): T {
