@@ -125,6 +125,10 @@ export function TaskCommentThread({ taskId, jiraKey, layout = 'default' }: Props
     queryKey: ['jira-thread', jiraKey],
     queryFn: () => getJiraIssueThread(jiraKey!),
     enabled: Boolean(jiraKey),
+    // Keep conversation live while the task detail is open
+    refetchInterval: jiraKey ? 10_000 : false,
+    staleTime: 5_000,
+    refetchOnWindowFocus: true,
   })
 
   const items = useMemo<ChatItem[]>(() => {

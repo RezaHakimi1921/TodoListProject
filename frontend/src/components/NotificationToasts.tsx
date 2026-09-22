@@ -5,6 +5,7 @@ import { Bell, MessageCircle, TicketPlus, X } from 'lucide-react'
 import {
   listNotifications,
   markNotificationRead,
+  markTaskNotificationsRead,
   TASK_NOTIFICATIONS_READ,
   type CommentNotification,
 } from '../api/notifications'
@@ -35,22 +36,53 @@ export function NotificationToasts() {
     const items = unreadQuery.data?.items ?? []
     if (!unreadQuery.data) return
     const unreadIds = new Set(items.map((item) => item.id))
+    const viewingMatch = location.pathname.match(/^\/tasks\/(\d+)/)
+    const viewingTaskId = viewingMatch ? Number(viewingMatch[1]) : Number.NaN
+    const viewingTask = Number.isFinite(viewingTaskId)
+
+    const refreshThread = (item: CommentNotification) => {
+      if (!item.jiraKey) return
+      if (item.kind === 'new-task' || item.kind === 'reminder') return
+      void queryClient.invalidateQueries({ queryKey: ['jira-thread', item.jiraKey] })
+    }
+
     if (knownIds.current === null) {
       knownIds.current = unreadIds
-      const recent = items.filter(isFreshNotification)
-      if (recent.length > 0) {
-        setToasts(recent.slice(0, 4))
+      if (viewingTask) {
+        for (const item of items) {
+          if (item.taskId === viewingTaskId) refreshThread(item)
+        }
       }
+      const recent = items
+        .filter(isFreshNotification)
+        .filter((item) => !viewingTask || item.taskId !== viewingTaskId)
+      if (recent.length > 0) setToasts(recent.slice(0, 4))
       return
     }
+
     const fresh = items.filter((item) => !knownIds.current!.has(item.id))
-    for (const item of fresh) knownIds.current.add(item.id)
+    let sawCommentOnOpenTask = false
+    for (const item of fresh) {
+      knownIds.current.add(item.id)
+      refreshThread(item)
+      if (viewingTask && item.taskId === viewingTaskId && item.kind !== 'new-task' && item.kind !== 'reminder') {
+        sawCommentOnOpenTask = true
+      }
+    }
+    if (sawCommentOnOpenTask) {
+      void markTaskNotificationsRead(viewingTaskId)
+        .then(() => {
+          void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+        })
+        .catch(() => undefined)
+    }
     setToasts((prev) => {
       const kept = prev.filter((row) => unreadIds.has(row.id))
-      if (fresh.length === 0) return kept
-      return [...fresh, ...kept].slice(0, 4)
+      const toShow = fresh.filter((item) => !viewingTask || item.taskId !== viewingTaskId)
+      if (toShow.length === 0) return kept
+      return [...toShow, ...kept].slice(0, 4)
     })
-  }, [unreadQuery.data])
+  }, [unreadQuery.data, location.pathname, queryClient])
 
   useEffect(() => {
     const match = location.pathname.match(/^\/tasks\/(\d+)/)

@@ -129,7 +129,8 @@ export function TaskDetailPage() {
     queryKey: ['jira-thread', liveJiraKey],
     queryFn: () => getJiraIssueThread(liveJiraKey!),
     enabled: Boolean(liveJiraKey),
-    staleTime: 60_000,
+    staleTime: 5_000,
+    refetchInterval: liveJiraKey ? 10_000 : false,
   })
   const jiraStatusQuery = useQuery({
     queryKey: ['jira-status', liveJiraKey],
