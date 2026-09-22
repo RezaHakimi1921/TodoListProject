@@ -47,8 +47,8 @@ export function useJiraClosedTasks() {
           const focusedHere =
             Boolean(focus?.active) && !focus?.isResting && focus?.taskId === task.id
           if (jira.status && isJiraClosedStatus(jira.status) && task.status !== 'Done') {
-            // User reopened a Jira-Done task to keep working — do not yank focus/status.
-            if (focusedHere) {
+            // User reopened / is actively working — never yank Doing back to Done from Jira.
+            if (focusedHere || task.status === 'Doing') {
               continue
             }
             if (focus?.taskId === task.id) closedFocusId = task.id

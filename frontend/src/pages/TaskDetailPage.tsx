@@ -224,16 +224,22 @@ export function TaskDetailPage() {
     mutationFn: async () => {
       const task = taskQuery.data
       if (!task) return
-      // Reopen Done/Open/Stuck so focus sticks on this task for review.
+      // Reopen Done/Open/Stuck first so Jira sync cannot yank this focus away.
+      let working = task
       if (task.status !== 'Doing') {
-        await updateTaskStatus(taskId, { status: 'Doing' })
+        working = await updateTaskStatus(taskId, { status: 'Doing' })
+        setStatus('Doing')
+        queryClient.setQueryData(['task', taskId], (old: unknown) =>
+          old && typeof old === 'object' ? { ...(old as object), status: 'Doing' } : old,
+        )
       }
-      await requestTaskFocus(task)
+      await requestTaskFocus({ ...task, ...working, status: 'Doing' })
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['focus'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
       void queryClient.invalidateQueries({ queryKey: ['task', taskId] })
+      void queryClient.invalidateQueries({ queryKey: ['jira-sync-tasks'] })
     },
   })
 
@@ -437,6 +443,10 @@ export function TaskDetailPage() {
             ).trim()
             const cancelled = Boolean(jiraName && isJiraCancelledStatus(jiraName))
             const jiraClosed = Boolean(jiraName && isJiraClosedStatus(jiraName))
+            // While this task is focused / Doing, keep working UI — don't push the Done wall.
+            if (focusedHere || status === 'Doing') {
+              return null
+            }
             if (status === 'Done' || jiraClosed) {
               return (
                 <section className={`rounded-xl px-3 py-3 border ${

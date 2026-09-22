@@ -110,16 +110,18 @@ export function TaskCard({ task, jiraStatus, onOpenDrawer, onOpenAging, onOpenRe
 
   const focusMutation = useMutation({
     mutationFn: async () => {
+      let working = task
       if (task.status !== 'Doing') {
-        await updateTaskStatus(task.id, { status: 'Doing' })
+        working = await updateTaskStatus(task.id, { status: 'Doing' })
       }
-      await requestTaskFocus(task)
+      await requestTaskFocus({ ...task, ...working, status: 'Doing' as const })
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['focus'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
       void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
       void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
+      void queryClient.invalidateQueries({ queryKey: ['jira-sync-tasks'] })
     },
   })
 
