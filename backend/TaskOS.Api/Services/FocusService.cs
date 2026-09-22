@@ -75,17 +75,12 @@ public sealed class FocusService : IFocusService
                     "SELECT Status FROM Task WHERE Id = @Id AND DeletedAt IS NULL AND OwnerUserId = @OwnerUserId", new { Id = taskId, OwnerUserId });
                 if (string.Equals(status, "Done", StringComparison.OrdinalIgnoreCase))
                 {
-                    // Done focus means the timer should stop, but do not yank the user
-                    // onto a previous task — they may reopen this Done item to review it.
-                    await LogElapsedWorkAsync(dto, WorkLogSources.Timer);
-                    await connection.ExecuteAsync(
-                        "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE OwnerUserId = @OwnerUserId",
-                        new { Now = TaskMapping.Now(), OwnerUserId });
-                    dto.Active = false;
-                    dto.Description = string.Empty;
-                    dto.TaskId = null;
+                    // Active focus on a Done task means the user reopened it to work.
+                    // Promote to Doing instead of clearing the banner (Jira may still say Done).
+                    await _tasks.UpdateStatusAsync(taskId, new UpdateTaskStatusRequest { Status = "Doing" });
+                    status = "Doing";
                 }
-                else
+
                 {
                     var title = await connection.QuerySingleOrDefaultAsync<string>(
                         "SELECT Title FROM Task WHERE Id = @Id AND DeletedAt IS NULL AND OwnerUserId = @OwnerUserId", new { Id = taskId, OwnerUserId });

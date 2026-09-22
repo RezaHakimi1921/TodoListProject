@@ -44,12 +44,23 @@ export function useJiraClosedTasks() {
           if (!jira) continue
 
           let nextStatus = task.status
+          const focusedHere =
+            Boolean(focus?.active) && !focus?.isResting && focus?.taskId === task.id
           if (jira.status && isJiraClosedStatus(jira.status) && task.status !== 'Done') {
+            // User reopened a Jira-Done task to keep working — do not yank focus/status.
+            if (focusedHere) {
+              continue
+            }
             if (focus?.taskId === task.id) closedFocusId = task.id
             nextStatus = 'Done'
             await updateTaskStatus(task.id, { status: 'Done' })
             changed = true
-          } else if (jira.status && !isJiraClosedStatus(jira.status) && task.status === 'Done') {
+          } else if (
+            jira.status &&
+            !isJiraClosedStatus(jira.status) &&
+            task.status === 'Done' &&
+            !focusedHere
+          ) {
             nextStatus = 'Open'
             await updateTaskStatus(task.id, { status: 'Open' })
             changed = true

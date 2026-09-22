@@ -59,7 +59,7 @@ export function useFocusTaskStatus() {
 
     const extras = tasks.filter((task) => task.status === 'Doing' && task.id !== currentId)
     const currentNeedsDoing = Boolean(
-      current && current.status === 'Open',
+      current && (current.status === 'Open' || current.status === 'Done'),
     )
     if (!currentNeedsDoing && extras.length === 0) return
 
