@@ -4,8 +4,11 @@ const KEY = 'taskos-theme'
 const listeners = new Set<() => void>()
 
 export function getTheme(): Theme {
-  if (typeof window === 'undefined') return 'dark'
-  return window.localStorage.getItem(KEY) === 'light' ? 'light' : 'dark'
+  if (typeof window === 'undefined') return 'light'
+  const stored = window.localStorage.getItem(KEY)
+  if (stored === 'light' || stored === 'dark') return stored
+  // Product default is light. Existing users who already chose dark keep it via KEY.
+  return 'light'
 }
 
 export function applyTheme(theme: Theme) {

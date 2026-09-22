@@ -526,9 +526,10 @@ export function DashboardPage() {
                   <TaskCard
                     key={task.id}
                     task={task}
+                    jiraStatus={jiraStateByKey.get((taskJiraKey(task) || '').toUpperCase())?.status}
                     onOpenDrawer={setEditingTask}
                     onOpenReminder={setReminderTask}
-                  onOpenAging={setAgingTask}
+                    onOpenAging={setAgingTask}
                   />
                 ))
               )}
@@ -561,9 +562,10 @@ export function DashboardPage() {
                   <TaskCard
                     key={task.id}
                     task={task}
+                    jiraStatus={jiraStateByKey.get((taskJiraKey(task) || '').toUpperCase())?.status}
                     onOpenDrawer={setEditingTask}
                     onOpenReminder={setReminderTask}
-                  onOpenAging={setAgingTask}
+                    onOpenAging={setAgingTask}
                   />
                 ))
               )}
@@ -595,6 +597,7 @@ export function DashboardPage() {
                 <TaskCard
                   key={task.id}
                   task={task}
+                  jiraStatus={jiraStateByKey.get((taskJiraKey(task) || '').toUpperCase())?.status}
                   onOpenDrawer={setEditingTask}
                   onOpenReminder={setReminderTask}
                   onOpenAging={setAgingTask}

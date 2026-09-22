@@ -109,8 +109,9 @@ public sealed class TaskService : ITaskService
             throw new ArgumentException("EnergyType must be Deep or Light.");
         }
 
+        var statusChanged = !existing.Status.Equals(request.Status, StringComparison.OrdinalIgnoreCase);
         var becomingDone = request.Status.Equals(TaskStatuses.Done, StringComparison.OrdinalIgnoreCase)
-            && !existing.Status.Equals(TaskStatuses.Done, StringComparison.OrdinalIgnoreCase);
+            && statusChanged;
         if (becomingDone)
         {
             using var scope = _scopes.CreateScope();
@@ -128,7 +129,7 @@ public sealed class TaskService : ITaskService
         }
         existing.UpdatedAt = TaskMapping.Now();
         await _tasks.UpdateAsync(existing);
-        if (becomingDone)
+        if (statusChanged)
         {
             await _inbox.MarkReadByTaskAsync(id);
         }
@@ -195,10 +196,12 @@ public sealed class TaskService : ITaskService
             await scope.ServiceProvider.GetRequiredService<IFocusService>().FlushElapsedForTaskAsync(id);
         }
 
+        var statusChanged = !existing.Status.Equals(status, StringComparison.OrdinalIgnoreCase);
         ApplyStatus(existing, status, reason);
         existing.UpdatedAt = TaskMapping.Now();
         await _tasks.UpdateAsync(existing);
-        if (status.Equals(TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
+        // Any status change means the user saw/handled the task — clear its inbox badge.
+        if (statusChanged)
         {
             await _inbox.MarkReadByTaskAsync(id);
         }

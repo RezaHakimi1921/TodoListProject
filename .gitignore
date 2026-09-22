@@ -24,5 +24,23 @@ frontend/vite.err.log
 Thumbs.db
 .DS_Store
 
-# Secrets
+# Secrets / local / deploy artifacts
 **/appsettings.Local.json
+publish/
+_publish/
+_restore/
+_jira_bak/
+.headers
+_pause.json
+_bench_slow.py
+_chk_*.py
+_fix_*.ps1
+_patch_*.py
+frontend/_patch_*.py
+embossed-login*.html
+backend/api-*.log
+backend/tasks.json
+backend/TaskOS.Api/api.boot.*.log
+backend/TaskOS.Api/run.*.log
+backend/TaskOS.Api/test-toast.*.log
+.mcp.json

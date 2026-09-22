@@ -22,7 +22,7 @@ public sealed class JiraRestClient : IJiraRestClient
     private static readonly Regex KeyPattern = new(@"^[A-Z][A-Z0-9]+-\d+$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private const string UnassignedJql =
         "project = PS AND assignee is EMPTY AND resolution is EMPTY";
-    private const string RecentJql = "project = PS AND updated >= -1d";
+    private const string RecentJql = "project = PS AND updated >= -1d ORDER BY updated DESC";
     private const string CreateProject = "SIP";
 
     private readonly HttpClient _http;
@@ -70,6 +70,99 @@ public sealed class JiraRestClient : IJiraRestClient
 
         var raw = await response.Content.ReadAsStringAsync(cancellationToken);
         throw new JiraRestException((int)response.StatusCode, raw);
+    }
+
+    public async Task<JiraIssueThread> GetIssueThreadAsync(string jiraKey, CancellationToken cancellationToken = default)
+    {
+        var key = RequireKey(jiraKey);
+        using var issueResponse = await _http.GetAsync(
+            $"rest/api/2/issue/{Uri.EscapeDataString(key)}?fields=description,created,reporter,assignee,creator,status",
+            cancellationToken);
+        using var commentsResponse = await _http.GetAsync(
+            $"rest/api/2/issue/{Uri.EscapeDataString(key)}/comment?expand=properties&maxResults=100",
+            cancellationToken);
+        if (!issueResponse.IsSuccessStatusCode || !commentsResponse.IsSuccessStatusCode)
+        {
+            var raw = await issueResponse.Content.ReadAsStringAsync(cancellationToken);
+            throw new JiraRestException((int)issueResponse.StatusCode, raw);
+        }
+
+        using var issueDoc = JsonDocument.Parse(await issueResponse.Content.ReadAsStringAsync(cancellationToken));
+        using var commentsDoc = JsonDocument.Parse(await commentsResponse.Content.ReadAsStringAsync(cancellationToken));
+        var rootEl = issueDoc.RootElement;
+        var fields = rootEl.TryGetProperty("fields", out var fieldsEl) ? fieldsEl : default;
+        static JiraIssuePerson? Person(JsonElement parent, string name)
+        {
+            if (parent.ValueKind != JsonValueKind.Object || !parent.TryGetProperty(name, out var el) || el.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            return new JiraIssuePerson
+            {
+                Name = el.TryGetProperty("name", out var n) ? n.GetString() : null,
+                DisplayName = el.TryGetProperty("displayName", out var d) ? d.GetString() : null,
+            };
+        }
+
+        var comments = new List<JiraCommentItem>();
+        if (commentsDoc.RootElement.TryGetProperty("comments", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in list.EnumerateArray())
+            {
+                var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                if (string.IsNullOrWhiteSpace(id)) continue;
+                var author = item.TryGetProperty("author", out var authorEl) ? authorEl : default;
+                var internalComment = false;
+                if (item.TryGetProperty("properties", out var props) && props.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var prop in props.EnumerateArray())
+                    {
+                        var pkey = prop.TryGetProperty("key", out var pk) ? pk.GetString() : null;
+                        if (!string.Equals(pkey, "sd.public.comment", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (prop.TryGetProperty("value", out var val) && val.ValueKind == JsonValueKind.Object
+                            && val.TryGetProperty("internal", out var inn) && inn.ValueKind == JsonValueKind.True)
+                        {
+                            internalComment = true;
+                        }
+                    }
+                }
+
+                comments.Add(new JiraCommentItem
+                {
+                    Id = id,
+                    Body = item.TryGetProperty("body", out var bodyEl) ? bodyEl.GetString() ?? "" : "",
+                    Created = item.TryGetProperty("created", out var createdEl) ? createdEl.GetString() ?? "" : "",
+                    AuthorName = author.ValueKind == JsonValueKind.Object && author.TryGetProperty("displayName", out var dn)
+                        ? dn.GetString() ?? ""
+                        : "",
+                    AuthorKey = author.ValueKind == JsonValueKind.Object && author.TryGetProperty("name", out var an)
+                        ? an.GetString() ?? ""
+                        : "",
+                    Internal = internalComment,
+                });
+            }
+        }
+
+        return new JiraIssueThread
+        {
+            Reporter = fields.ValueKind == JsonValueKind.Object ? Person(fields, "reporter") : null,
+            Assignee = fields.ValueKind == JsonValueKind.Object ? Person(fields, "assignee") : null,
+            Creator = fields.ValueKind == JsonValueKind.Object ? Person(fields, "creator") : null,
+            Description = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("description", out var desc)
+                ? desc.GetString() ?? ""
+                : "",
+            Created = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("created", out var created)
+                ? created.GetString() ?? ""
+                : "",
+            Status = fields.ValueKind == JsonValueKind.Object
+                && fields.TryGetProperty("status", out var statusEl)
+                && statusEl.ValueKind == JsonValueKind.Object
+                && statusEl.TryGetProperty("name", out var statusName)
+                    ? statusName.GetString() ?? ""
+                    : "",
+            Comments = comments,
+        };
     }
 
     public async Task<bool> AssignToMeAsync(string jiraKey, CancellationToken cancellationToken = default)
@@ -428,7 +521,7 @@ public sealed class JiraRestClient : IJiraRestClient
 
     public async Task<IReadOnlyList<JiraIssueComments>> ListRecentlyUpdatedProductSupportAsync(CancellationToken cancellationToken = default)
     {
-        var url = $"rest/api/2/search?jql={Uri.EscapeDataString(RecentJql)}&fields=summary,comment,status&maxResults=50";
+        var url = $"rest/api/2/search?jql={Uri.EscapeDataString(RecentJql)}&fields=summary,comment,status&maxResults=100";
         using var response = await _http.GetAsync(url, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
@@ -592,7 +685,7 @@ public sealed class JiraRestClient : IJiraRestClient
         foreach (var batch in valid.Chunk(40))
         {
             var jql = "key in (" + string.Join(",", batch) + ")";
-            var url = $"rest/api/2/search?jql={Uri.EscapeDataString(jql)}&fields=summary,comment,status&maxResults=50";
+            var url = $"rest/api/2/search?jql={Uri.EscapeDataString(jql)}&fields=summary,comment,status&maxResults=100";
             using var response = await _http.GetAsync(url, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -628,7 +721,7 @@ public sealed class JiraRestClient : IJiraRestClient
         foreach (var batch in valid.Chunk(40))
         {
             var jql = "key in (" + string.Join(",", batch) + ")";
-            var url = $"rest/api/2/search?jql={Uri.EscapeDataString(jql)}&fields=status,assignee&maxResults=50";
+            var url = $"rest/api/2/search?jql={Uri.EscapeDataString(jql)}&fields=status,assignee,creator&maxResults=50";
             using var response = await _http.GetAsync(url, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -659,12 +752,18 @@ public sealed class JiraRestClient : IJiraRestClient
                     ? assigneeEl
                     : default;
                 var parsed = ReadAssignee(assignee);
+                var creatorEl = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("creator", out var creatorProp)
+                    ? creatorProp
+                    : default;
+                var creator = ReadAssignee(creatorEl);
                 rows.Add(new JiraIssueState
                 {
                     Key = key.ToUpperInvariant(),
                     Status = status,
                     AssigneeName = parsed.Name,
-                    AssigneeDisplay = parsed.Display
+                    AssigneeDisplay = parsed.Display,
+                    CreatorName = creator.Name,
+                    CreatorDisplay = creator.Display
                 });
             }
         }

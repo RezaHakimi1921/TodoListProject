@@ -64,13 +64,17 @@ public sealed class JiraLinkService : IJiraLinkService
     {
         var key = NormalizeKey(request.JiraKey, request.JiraUrl);
         var title = await ResolveTitleAsync(request.Title, key);
-        var (task, _) = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType, null);
+        var (task, registeredNew) = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType, null);
         if (string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase))
         {
             await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = TaskStatuses.Doing });
             task = await _tasks.GetAsync(task.Id) ?? task;
         }
         await TryAssignAsync(key);
+        if (registeredNew && !ActivityJira.IsActivity(key))
+        {
+            await _inbox.AddNewTaskAsync(task.Id, key, task.Title, task.CreatedAt);
+        }
 
         var focus = await _focus.GetAsync();
         if (focus.Active && focus.TaskId == task.Id)

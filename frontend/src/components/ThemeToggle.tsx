@@ -3,7 +3,7 @@ import { Moon, Sun } from 'lucide-react'
 import { getTheme, subscribeTheme, toggleTheme } from '../lib/theme'
 
 export function ThemeToggle({ compact = false }: { compact?: boolean }) {
-  const theme = useSyncExternalStore(subscribeTheme, getTheme, () => 'dark' as const)
+  const theme = useSyncExternalStore(subscribeTheme, getTheme, () => 'light' as const)
   const light = theme === 'light'
 
   return (

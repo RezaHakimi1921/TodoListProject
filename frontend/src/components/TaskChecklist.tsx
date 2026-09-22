@@ -11,9 +11,10 @@ import { useTrashConfirm } from './ConfirmProvider'
 
 interface Props {
   taskId: number
+  compact?: boolean
 }
 
-export function TaskChecklist({ taskId }: Props) {
+export function TaskChecklist({ taskId, compact = false }: Props) {
   const queryClient = useQueryClient()
   const askTrash = useTrashConfirm()
   const [draft, setDraft] = useState('')
@@ -77,23 +78,32 @@ export function TaskChecklist({ taskId }: Props) {
   }
 
   return (
-    <div className="space-y-3">
-      {items.length > 0 && (
-        <div className="rounded-3xl border border-[#212738] bg-[#141824] p-5 shadow-xl space-y-3">
+    <div className={compact ? 'space-y-2' : 'space-y-3'}>
+      {(items.length > 0 || compact) && (
+        <div className={compact
+          ? 'rounded-xl border border-[#212738] bg-[#141824] px-3 py-2.5 space-y-2'
+          : 'rounded-3xl border border-[#212738] bg-[#141824] p-5 shadow-xl space-y-3'}>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <CheckSquare className="w-5 h-5 text-amber-400" />
-              <h3 className="text-base font-bold text-white">چک‌لیست مراحل</h3>
+              <CheckSquare className={compact ? 'w-4 h-4 text-amber-400' : 'w-5 h-5 text-amber-400'} />
+              <h3 className={compact ? 'text-[11px] font-bold text-slate-200' : 'text-base font-bold text-white'}>مراحل</h3>
             </div>
             <span className="text-[11px] font-medium text-slate-400">
-              {done} از {items.length} انجام شد
+              {done} / {items.length || 0}
             </span>
           </div>
-          <div className="space-y-1.5">
+          {items.length === 0 ? (
+            <p className="py-2 text-center text-[11px] text-slate-500">هنوز مرحله‌ای نیست.</p>
+          ) : (
+          <div className="space-y-1">
             {items.map((item, index) => (
               <div
                 key={item.id}
-                className="flex items-center gap-2 rounded-xl border border-white/[0.06] bg-[#0b0e16] px-2.5 py-2"
+                className={
+                  compact
+                    ? 'group flex items-center gap-2 rounded-lg px-1 py-1 hover:bg-white/[0.03]'
+                    : 'flex items-center gap-2 rounded-xl border border-white/[0.06] bg-[#0b0e16] px-2.5 py-2'
+                }
               >
                 <input
                   type="checkbox"
@@ -123,30 +133,34 @@ export function TaskChecklist({ taskId }: Props) {
                     item.isDone ? 'text-slate-500 line-through' : 'text-slate-200'
                   }`}
                 />
-                <button
-                  type="button"
-                  disabled={index === 0}
-                  onClick={() => move(index, -1)}
-                  className="p-1 text-slate-500 hover:text-slate-200 disabled:opacity-30"
-                  title="بالا"
-                >
-                  <ChevronUp className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  disabled={index === items.length - 1}
-                  onClick={() => move(index, 1)}
-                  className="p-1 text-slate-500 hover:text-slate-200 disabled:opacity-30"
-                  title="پایین"
-                >
-                  <ChevronDown className="w-3.5 h-3.5" />
-                </button>
+                {!compact ? (
+                  <>
+                    <button
+                      type="button"
+                      disabled={index === 0}
+                      onClick={() => move(index, -1)}
+                      className="p-1 text-slate-500 hover:text-slate-200 disabled:opacity-30"
+                      title="بالا"
+                    >
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={index === items.length - 1}
+                      onClick={() => move(index, 1)}
+                      className="p-1 text-slate-500 hover:text-slate-200 disabled:opacity-30"
+                      title="پایین"
+                    >
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                  </>
+                ) : null}
                 <button
                   type="button"
                   onClick={async () => {
                     if (await askTrash(item.title)) deleteMutation.mutate(item.id)
                   }}
-                  className="p-1 text-slate-500 hover:text-rose-400"
+                  className={`p-1 text-slate-500 hover:text-rose-400 ${compact ? 'opacity-0 group-hover:opacity-100' : ''}`}
                   title="حذف مرحله"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -154,6 +168,7 @@ export function TaskChecklist({ taskId }: Props) {
               </div>
             ))}
           </div>
+          )}
         </div>
       )}
 
@@ -189,10 +204,10 @@ export function TaskChecklist({ taskId }: Props) {
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-300 hover:text-amber-200"
+          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-300 hover:text-amber-200"
         >
           <Plus className="w-3.5 h-3.5" />
-          افزودن Step
+          افزودن مرحله
         </button>
       )}
     </div>

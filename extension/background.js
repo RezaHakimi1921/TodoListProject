@@ -5,7 +5,17 @@ const BEAT_ALARM = 'taskos-jira-beat'
 const SCAN_ALARM = 'taskos-jira-scan'
 const NOTE_ID = 'taskos-ping'
 const JIRA_NOTE = 'taskos-jira'
-const API = 'http://127.0.0.1:5088'
+const API = 'http://192.168.210.196'
+function extHeaders(extra) {
+  return Object.assign({ 'X-TaskOS-Extension': '1' }, extra || {})
+}
+
+async function apiFetch(path, options) {
+  const opts = options || {}
+  opts.headers = extHeaders(opts.headers || {})
+  return fetch(API + path, opts)
+}
+
 const DEFAULT_PING = 10
 const JIRA_HOST = 'jira.smartx.ir'
 const DWELL_MS = 30 * 1000
@@ -26,7 +36,7 @@ function clampPing(value) {
 
 async function getPingMinutes() {
   try {
-    const response = await fetch(`${API}/api/settings`)
+    const response = await apiFetch("/api/settings")
     if (!response.ok) return DEFAULT_PING
     const data = await response.json()
     const minutes = clampPing(data.pingMinutes)
@@ -52,7 +62,7 @@ async function ensureSyncAlarm() {
 
 async function getFocus() {
   try {
-    const response = await fetch(`${API}/api/focus`)
+    const response = await apiFetch("/api/focus")
     if (!response.ok) return null
     return await response.json()
   } catch {
@@ -100,7 +110,7 @@ async function showPing() {
   if (stored.paused) return
 
   try {
-    const live = await fetch(`${API}/api/health`)
+    const live = await apiFetch("/api/health")
     if (live.ok) return
   } catch {
     /* API down — Chrome notification is the fallback */
@@ -126,7 +136,7 @@ async function showPing() {
 async function markJiraNotificationsRead(key) {
   if (!key) return
   try {
-    await fetch(`${API}/api/notifications/read-key/${encodeURIComponent(key)}`, { method: 'POST' })
+    await apiFetch(`/api/notifications/read-key/${encodeURIComponent(key)}`, { method: 'POST' })
   } catch {
     /* API down */
   }
@@ -154,8 +164,8 @@ function isClosedStatus(name) {
 function isTaskOsUrl(url) {
   try {
     const parsed = new URL(url)
-    return (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')
-      && (parsed.port === '5173' || parsed.port === '5088' || parsed.port === '')
+    return (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost' || parsed.hostname === '192.168.210.196')
+      && (parsed.port === '5173' || parsed.port === '5088' || parsed.port === '80' || parsed.port === '')
   } catch {
     return false
   }
@@ -167,7 +177,7 @@ async function assignPsToMe(key) {
     await fetch(`https://${JIRA_HOST}/rest/api/2/issue/${encodeURIComponent(key)}/assignee`, {
       method: 'PUT',
       credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
+      headers: extHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ name: 'reza' }),
     })
   } catch {
@@ -265,9 +275,9 @@ async function writeWatch(watch) {
 async function heartbeatWatch(watch) {
   if (!watch?.key || !isProductSupport(watch.key)) return
   try {
-    await fetch(`${API}/api/jira/watch`, {
+    await apiFetch("/api/jira/watch", {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: extHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         jiraKey: watch.key,
         jiraUrl: watch.url,
@@ -286,7 +296,7 @@ async function clearWatchAndApi(key) {
   await chrome.alarms.clear(BEAT_ALARM)
   try {
     const query = key ? `?key=${encodeURIComponent(key)}` : ''
-    await fetch(`${API}/api/jira/watch${query}`, { method: 'DELETE' })
+    await apiFetch(`/api/jira/watch${query}`, { method: 'DELETE' })
   } catch {
     /* API down */
   }
@@ -333,7 +343,7 @@ async function stillWatching(key) {
 
 async function findTaskByJiraKey(key) {
   try {
-    const response = await fetch(`${API}/api/tasks?q=${encodeURIComponent(key)}`)
+    const response = await apiFetch(`/api/tasks?q=${encodeURIComponent(key)}`)
     if (!response.ok) return null
     const rows = await response.json()
     const upper = String(key).toUpperCase()
@@ -492,9 +502,9 @@ async function showJiraAsk(seen) {
 async function startJira(seen, { finishPrevious, markPreviousDone }) {
   const minutes = await getPingMinutes()
   try {
-    const response = await fetch(`${API}/api/jira/start`, {
+    const response = await apiFetch("/api/jira/start", {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: extHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         jiraKey: seen.jiraKey,
         jiraUrl: seen.jiraUrl,
@@ -560,7 +570,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     const status = String(message.status || '')
     const key = String(message.key || '').trim().toUpperCase()
     if (key && isClosedStatus(status)) {
-      void fetch(`${API}/api/jira/issues/${encodeURIComponent(key)}/sync-closed`, { method: 'POST' }).catch(() => undefined)
+      void apiFetch(`/api/jira/issues/${encodeURIComponent(key)}/sync-closed`, { method: 'POST' }).catch(() => undefined)
     }
   }
   if (message && message.type === 'test-ping') {

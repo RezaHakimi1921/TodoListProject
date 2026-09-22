@@ -87,6 +87,40 @@ public sealed class PushNotificationService : IPushNotificationService
         return ToPhoneDto(topic, await ResolvePhoneBaseUrlAsync());
     }
 
+    public async Task<int> SendToTopicAsync(string topic, string title, string body, string url)
+    {
+        var clean = NormalizeTopic(topic);
+        if (clean.Length == 0) return 0;
+        try
+        {
+            var heading = string.IsNullOrWhiteSpace(title) ? "TaskOS" : title.Trim();
+            var text = string.IsNullOrWhiteSpace(body) ? "یک اعلان جدید" : body.Trim();
+            if (text.Length > 400) text = text[..400] + "…";
+            var click = await AbsolutePhoneUrlAsync(url);
+            var payload = JsonSerializer.Serialize(new
+            {
+                topic = clean,
+                title = heading,
+                message = text,
+                priority = 4,
+                tags = new[] { "iphone" },
+                click,
+                actions = string.IsNullOrWhiteSpace(click)
+                    ? null
+                    : new[] { new { action = "view", label = "TaskOS", url = click, clear = true } },
+            }, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://ntfy.sh");
+            request.Content = new StringContent(payload, Encoding.UTF8, "application/json");
+            using var client = _httpFactory.CreateClient();
+            using var response = await client.SendAsync(request);
+            return response.IsSuccessStatusCode ? 1 : 0;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "ntfy topic send failed");
+            return 0;
+        }
+    }
     public async Task<int> SendAsync(string title, string body, string url)
     {
         try
@@ -227,6 +261,8 @@ public sealed class PushNotificationService : IPushNotificationService
 
         return root + (path.StartsWith('/') ? path : "/" + path);
     }
+
+    public static string DetectPreferredLanBaseUrl() => DetectLanBaseUrl();
 
     private static string DetectLanBaseUrl()
     {

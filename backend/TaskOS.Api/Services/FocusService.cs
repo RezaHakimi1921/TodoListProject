@@ -11,23 +11,33 @@ public sealed class FocusService : IFocusService
     private readonly IWorkLogService _workLogs;
     private readonly ITaskService _tasks;
     private readonly ISettingsService _settings;
+    private readonly ICurrentUser _user;
 
-    public FocusService(SqliteConnectionFactory factory, IWorkLogService workLogs, ITaskService tasks, ISettingsService settings)
+    public FocusService(SqliteConnectionFactory factory, IWorkLogService workLogs, ITaskService tasks, ISettingsService settings, ICurrentUser user)
     {
         _factory = factory;
         _workLogs = workLogs;
         _tasks = tasks;
         _settings = settings;
+        _user = user;
     }
+
+    private string? TryOwner() => string.IsNullOrWhiteSpace(_user.UserId) ? null : _user.UserId;
+    private string OwnerUserId => string.IsNullOrWhiteSpace(_user.UserId) ? "reza" : _user.UserId.Trim().ToLowerInvariant();
 
     public async Task<WorkFocusDto> GetAsync()
     {
-        int? resumeDoneId = null;
+        if (TryOwner() is null)
+        {
+            return new WorkFocusDto { Active = false };
+        }
+
         WorkFocusDto dto;
         using (var connection = _factory.Create())
         {
             var row = await connection.QuerySingleOrDefaultAsync<FocusRow>(
-                "SELECT Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active FROM WorkFocus WHERE Id = 1");
+                "SELECT Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active FROM WorkFocus WHERE OwnerUserId = @OwnerUserId",
+                new { OwnerUserId });
             dto = Map(row);
             dto.IsResting = await _settings.IsRestingAsync();
             dto.Note = await _settings.GetRestNoteAsync();
@@ -37,8 +47,8 @@ public sealed class FocusService : IFocusService
             {
                 var now = TaskMapping.Now();
                 await connection.ExecuteAsync(
-                    "UPDATE WorkFocus SET StartedAt = @Now, UpdatedAt = @Now WHERE Id = 1",
-                    new { Now = now });
+                    "UPDATE WorkFocus SET StartedAt = @Now, UpdatedAt = @Now WHERE OwnerUserId = @OwnerUserId",
+                    new { Now = now, OwnerUserId });
                 dto.StartedAt = now;
             }
             if (dto.IsResting && dto.TaskId is int restTaskId)
@@ -53,7 +63,7 @@ public sealed class FocusService : IFocusService
             else if (dto.Active && !dto.IsResting && dto.ProblemId is int focusedProblemId && dto.TaskId is null)
             {
                 var problemTitle = await connection.QuerySingleOrDefaultAsync<string>(
-                    "SELECT Title FROM Problem WHERE Id = @Id AND DeletedAt IS NULL", new { Id = focusedProblemId });
+                    "SELECT Title FROM Problem WHERE Id = @Id AND DeletedAt IS NULL AND OwnerUserId = @OwnerUserId", new { Id = focusedProblemId, OwnerUserId });
                 if (!string.IsNullOrWhiteSpace(problemTitle))
                 {
                     dto.Description = problemTitle;
@@ -62,42 +72,34 @@ public sealed class FocusService : IFocusService
             else if (dto.Active && !dto.IsResting && dto.TaskId is int taskId)
             {
                 var status = await connection.QuerySingleOrDefaultAsync<string>(
-                    "SELECT Status FROM Task WHERE Id = @Id AND DeletedAt IS NULL", new { Id = taskId });
+                    "SELECT Status FROM Task WHERE Id = @Id AND DeletedAt IS NULL AND OwnerUserId = @OwnerUserId", new { Id = taskId, OwnerUserId });
                 if (string.Equals(status, "Done", StringComparison.OrdinalIgnoreCase))
                 {
+                    // Done focus means the timer should stop, but do not yank the user
+                    // onto a previous task — they may reopen this Done item to review it.
                     await LogElapsedWorkAsync(dto, WorkLogSources.Timer);
                     await connection.ExecuteAsync(
-                        "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE Id = 1",
-                        new { Now = TaskMapping.Now() });
+                        "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE OwnerUserId = @OwnerUserId",
+                        new { Now = TaskMapping.Now(), OwnerUserId });
                     dto.Active = false;
                     dto.Description = string.Empty;
                     dto.TaskId = null;
-                    resumeDoneId = taskId;
                 }
                 else
                 {
                     var title = await connection.QuerySingleOrDefaultAsync<string>(
-                        "SELECT Title FROM Task WHERE Id = @Id AND DeletedAt IS NULL", new { Id = taskId });
+                        "SELECT Title FROM Task WHERE Id = @Id AND DeletedAt IS NULL AND OwnerUserId = @OwnerUserId", new { Id = taskId, OwnerUserId });
                     if (!string.IsNullOrWhiteSpace(title))
                     {
                         dto.Description = title;
                         if (IsBrokenDescription(row?.Description))
                         {
                             await connection.ExecuteAsync(
-                                "UPDATE WorkFocus SET Description = @Title WHERE Id = 1",
-                                new { Title = title });
+                                "UPDATE WorkFocus SET Description = @Title WHERE OwnerUserId = @OwnerUserId",
+                                new { Title = title, OwnerUserId });
                         }
                     }
                 }
-            }
-        }
-
-        if (resumeDoneId is int doneId)
-        {
-            var resumed = await ResumePreviousFocusAsync(doneId);
-            if (resumed is not null)
-            {
-                return resumed;
             }
         }
 
@@ -121,27 +123,31 @@ public sealed class FocusService : IFocusService
         var now = TaskMapping.Now();
         using var connection = _factory.Create();
         await connection.ExecuteAsync("""
-            INSERT INTO WorkFocus (Id, Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active)
-            VALUES (1, @Description, @TaskId, @ProblemId, @Now, @Now, 1)
-            ON CONFLICT(Id) DO UPDATE SET
+            INSERT INTO WorkFocus (OwnerUserId, Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active)
+            VALUES (@OwnerUserId, @Description, @TaskId, @ProblemId, @Now, @Now, 1)
+            ON CONFLICT(OwnerUserId) DO UPDATE SET
                 Description = excluded.Description,
                 TaskId = excluded.TaskId,
                 ProblemId = excluded.ProblemId,
                 StartedAt = excluded.StartedAt,
                 UpdatedAt = excluded.UpdatedAt,
                 Active = 1
-            """, new { Description = description, TaskId = request.TaskId, ProblemId = request.ProblemId, Now = now });
+            """, new { Description = description, TaskId = request.TaskId, ProblemId = request.ProblemId, Now = now, OwnerUserId });
 
         if (request.TaskId is int startedId)
         {
             var started = await _tasks.GetAsync(startedId);
-            if (started is not null && !string.Equals(started.Status, "Done", StringComparison.OrdinalIgnoreCase))
+            if (started is not null
+                && !string.Equals(started.Status, "Doing", StringComparison.OrdinalIgnoreCase))
             {
+                // Reopening a Done task for review must become Doing so GetAsync
+                // does not immediately clear this focus.
                 await _tasks.UpdateStatusAsync(startedId, new UpdateTaskStatusRequest { Status = "Doing" });
             }
         }
 
-        return await GetAsync();
+        var result = await GetAsync();
+        return result;
     }
 
     public async Task<WorkFocusDto> TickAsync(FocusActionRequest request)
@@ -156,8 +162,8 @@ public sealed class FocusService : IFocusService
         var now = TaskMapping.Now();
         using var connection = _factory.Create();
         await connection.ExecuteAsync(
-            "UPDATE WorkFocus SET StartedAt = @Now, UpdatedAt = @Now WHERE Id = 1",
-            new { Now = now });
+            "UPDATE WorkFocus SET StartedAt = @Now, UpdatedAt = @Now WHERE OwnerUserId = @OwnerUserId",
+            new { Now = now, OwnerUserId });
         return await GetAsync();
     }
 
@@ -183,9 +189,10 @@ public sealed class FocusService : IFocusService
         await _settings.SetRestingAsync(false);
         using var connection = _factory.Create();
         await connection.ExecuteAsync(
-            "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE Id = 1",
-            new { Now = TaskMapping.Now() });
-        return await GetAsync();
+            "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE OwnerUserId = @OwnerUserId",
+            new { Now = TaskMapping.Now(), OwnerUserId });
+        var finished = await GetAsync();
+        return finished;
     }
 
     public async Task<WorkFocusDto> ClearAsync()
@@ -203,9 +210,23 @@ public sealed class FocusService : IFocusService
         await _settings.SetRestingAsync(false);
         using var connection = _factory.Create();
         await connection.ExecuteAsync(
-            "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE Id = 1",
-            new { Now = TaskMapping.Now() });
-        return await GetAsync();
+            "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE OwnerUserId = @OwnerUserId",
+            new { Now = TaskMapping.Now(), OwnerUserId });
+        var cleared = await GetAsync();
+        return cleared;
+    }
+
+    public async Task<WorkFocusDto> ClearWithoutLogAsync()
+    {
+        // Logout / session end: stop the timer but do not write a work log.
+        await _settings.SetRestingAsync(false);
+        await _settings.SetRestNoteAsync(null);
+        using var connection = _factory.Create();
+        await connection.ExecuteAsync(
+            "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE OwnerUserId = @OwnerUserId",
+            new { Now = TaskMapping.Now(), OwnerUserId });
+        var cleared = await GetAsync();
+        return cleared;
     }
 
     public async Task<WorkFocusDto> StartRestAsync(string? description = null, int? activityTaskId = null, string? note = null)
@@ -241,16 +262,16 @@ public sealed class FocusService : IFocusService
         var now = TaskMapping.Now();
         using var connection = _factory.Create();
         await connection.ExecuteAsync("""
-            INSERT INTO WorkFocus (Id, Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active)
-            VALUES (1, @Description, @TaskId, NULL, @Now, @Now, 1)
-            ON CONFLICT(Id) DO UPDATE SET
+            INSERT INTO WorkFocus (OwnerUserId, Description, TaskId, ProblemId, StartedAt, UpdatedAt, Active)
+            VALUES (@OwnerUserId, @Description, @TaskId, NULL, @Now, @Now, 1)
+            ON CONFLICT(OwnerUserId) DO UPDATE SET
                 Description = excluded.Description,
                 TaskId = excluded.TaskId,
                 ProblemId = NULL,
                 StartedAt = excluded.StartedAt,
                 UpdatedAt = excluded.UpdatedAt,
                 Active = 1
-            """, new { Description = title, TaskId = activityTaskId, Now = now });
+            """, new { Description = title, TaskId = activityTaskId, Now = now, OwnerUserId });
         if (!string.IsNullOrWhiteSpace(note))
         {
             await _settings.SetRestNoteAsync(note);
@@ -363,11 +384,10 @@ public sealed class FocusService : IFocusService
         using (var connection = _factory.Create())
         {
             await connection.ExecuteAsync(
-                "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE Id = 1",
-                new { Now = TaskMapping.Now() });
+                "UPDATE WorkFocus SET Active = 0, UpdatedAt = @Now WHERE OwnerUserId = @OwnerUserId",
+                new { Now = TaskMapping.Now(), OwnerUserId });
         }
 
-        await ResumePreviousFocusAsync(taskId);
     }
 
     private async Task<WorkFocusDto?> ResumePreviousFocusAsync(int doneTaskId)
@@ -389,11 +409,15 @@ public sealed class FocusService : IFocusService
     private async Task<TaskDto?> PickPreviousFocusTaskAsync(int doneTaskId)
     {
         var tasks = await _tasks.ListAsync(null, null, null);
-        var candidates = tasks.Where(task =>
-            task.Id != doneTaskId
-            && !string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(task.Ownership, TaskOwnerships.Other, StringComparison.OrdinalIgnoreCase)
-            && !IsResumeSkipTask(task.JiraKey)).ToList();
+        var candidates = new List<TaskDto>();
+        foreach (var task in tasks)
+        {
+            if (task.Id == doneTaskId) continue;
+            if (string.Equals(task.Status, TaskStatuses.Done, StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.Equals(task.Ownership, TaskOwnerships.Other, StringComparison.OrdinalIgnoreCase)) continue;
+            if (await IsResumeSkipTaskAsync(task.JiraKey)) continue;
+            candidates.Add(task);
+        }
 
         var paused = candidates
             .Where(task =>
@@ -412,7 +436,7 @@ public sealed class FocusService : IFocusService
             .FirstOrDefault();
     }
 
-    private static bool IsResumeSkipTask(string? jiraKey)
+    private async Task<bool> IsResumeSkipTaskAsync(string? jiraKey)
     {
         if (ActivityJira.IsActivity(jiraKey))
         {
@@ -591,7 +615,7 @@ public sealed class FocusService : IFocusService
         {
             using var connection = _factory.Create();
             var problemTitle = await connection.QuerySingleOrDefaultAsync<string>(
-                "SELECT Title FROM Problem WHERE Id = @Id AND DeletedAt IS NULL", new { Id = problemId });
+                "SELECT Title FROM Problem WHERE Id = @Id AND DeletedAt IS NULL AND OwnerUserId = @OwnerUserId", new { Id = problemId, OwnerUserId });
             if (!string.IsNullOrWhiteSpace(problemTitle))
             {
                 return problemTitle.Trim();

@@ -7,7 +7,9 @@ export interface TaskReminder {
   note?: string | null
   createdAt: string
   firedAt?: string | null
+  acknowledgedAt?: string | null
   fired?: boolean
+  acknowledged?: boolean
   taskTitle?: string | null
   jiraKey?: string | null
 }
@@ -20,7 +22,9 @@ function camel(row: Record<string, unknown>): TaskReminder {
     note: (row.note as string | null) ?? null,
     createdAt: String(row.createdAt ?? ''),
     firedAt: (row.firedAt as string | null) ?? null,
+    acknowledgedAt: (row.acknowledgedAt as string | null) ?? null,
     fired: Boolean(row.fired),
+    acknowledged: Boolean(row.acknowledged),
     taskTitle: (row.taskTitle as string | null) ?? null,
     jiraKey: (row.jiraKey as string | null) ?? null,
   }
@@ -53,4 +57,12 @@ export function listFiredReminders(limit = 50) {
 
 export function updateTaskReminder(id: number, input: { remindAt: string; note?: string }) {
   return api.put<Record<string, unknown>>(`/api/reminders/${id}`, input).then(camel)
+}
+
+export function acknowledgeReminder(id: number) {
+  return api.post<{ ok: boolean }>(`/api/reminders/${id}/ack`, {})
+}
+
+export function acknowledgeTaskReminders(taskId: number) {
+  return api.post<{ ok: boolean; acknowledged: number }>(`/api/tasks/${taskId}/reminders/ack`, {})
 }

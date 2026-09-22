@@ -40,6 +40,24 @@ public sealed class JiraCommentItem
     public string Created { get; init; } = string.Empty;
     public string AuthorName { get; init; } = string.Empty;
     public string AuthorKey { get; init; } = string.Empty;
+    public bool Internal { get; init; }
+}
+
+public sealed class JiraIssuePerson
+{
+    public string? Name { get; init; }
+    public string? DisplayName { get; init; }
+}
+
+public sealed class JiraIssueThread
+{
+    public JiraIssuePerson? Reporter { get; init; }
+    public JiraIssuePerson? Assignee { get; init; }
+    public JiraIssuePerson? Creator { get; init; }
+    public string Description { get; init; } = string.Empty;
+    public string Created { get; init; } = string.Empty;
+    public string Status { get; init; } = string.Empty;
+    public IReadOnlyList<JiraCommentItem> Comments { get; init; } = [];
 }
 
 public sealed class JiraIssueComments
@@ -56,6 +74,8 @@ public sealed class JiraIssueState
     public string Status { get; init; } = string.Empty;
     public string? AssigneeName { get; init; }
     public string? AssigneeDisplay { get; init; }
+    public string? CreatorName { get; init; }
+    public string? CreatorDisplay { get; init; }
 }
 
 public sealed class JiraWorklogItem
@@ -84,6 +104,7 @@ public sealed class JiraWorklogItem
 public interface IJiraRestClient
 {
     Task AddIssueCommentAsync(string jiraKey, string body, bool internalComment = false, CancellationToken cancellationToken = default);
+    Task<JiraIssueThread> GetIssueThreadAsync(string jiraKey, CancellationToken cancellationToken = default);
     Task<bool> AssignToMeAsync(string jiraKey, CancellationToken cancellationToken = default);
     Task<JiraCreateMeta> GetSipCreateMetaAsync(CancellationToken cancellationToken = default);
     Task<JiraCreatedIssue> CreateSipIssueAsync(

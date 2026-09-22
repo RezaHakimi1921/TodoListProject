@@ -268,9 +268,10 @@ export function NowWorkingBanner() {
           </div>
         </section>
       ) : !active ? (
-        <section className="rounded-2xl border border-white/[0.08] bg-[#10131b] px-4 py-3.5">
-          <p className="text-[10px] font-semibold tracking-wide text-slate-500 mb-1">الان روی این کار هستی</p>
-          <p className="text-sm text-slate-400">هنوز تمرکزی شروع نشده.</p>
+        <section className="rounded-2xl border border-sky-400/25 bg-sky-500/[0.06] px-4 py-3.5">
+          <p className="text-[10px] font-semibold tracking-wide text-sky-300/90 mb-1">در انتظار انتخاب تسک</p>
+          <p className="text-sm font-medium text-slate-100">الان می‌خوای روی کدوم کار کار کنی؟</p>
+          <p className="mt-1 text-[11px] text-slate-400">بعد از بستن یک تسک (Done / Cancel / Not Solvable) تسک قبلی خودکار باز نمی‌شود — یکی را از لیست شروع کن.</p>
           {pendingLine}
           <div className="mt-3 flex flex-wrap gap-2">
             {REST_KINDS.map((item) => (

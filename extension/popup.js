@@ -1,4 +1,4 @@
-const API = 'http://127.0.0.1:5088'
+const API = 'http://192.168.210.196'
 const DEFAULT_PING = 10
 const params = new URLSearchParams(location.search)
 const source = params.get('source') === 'Timer' ? 'Timer' : 'Extension'
@@ -129,7 +129,7 @@ async function startFocus(payload) {
   const ping = await loadPingMinutes()
   const response = await fetch(`${API}/api/focus`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-TaskOS-Extension': '1' },
     body: JSON.stringify({
       durationMinutes: Number(minutes.value) || ping,
       source,
@@ -147,7 +147,7 @@ async function startJira({ finishPrevious, markPreviousDone }) {
   const ping = await loadPingMinutes()
   const response = await fetch(`${API}/api/jira/start`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-TaskOS-Extension': '1' },
     body: JSON.stringify({
       jiraKey,
       jiraUrl,
@@ -256,7 +256,7 @@ document.getElementById('continueBtn').addEventListener('click', async () => {
     const ping = await loadPingMinutes()
     const response = await fetch(`${API}/api/focus/tick`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-TaskOS-Extension': '1' },
       body: JSON.stringify({ durationMinutes: Number(minutes.value) || ping, source }),
     })
     const data = await response.json()
@@ -273,7 +273,7 @@ document.getElementById('finishBtn').addEventListener('click', async () => {
     const ping = await loadPingMinutes()
     const response = await fetch(`${API}/api/focus/finish`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-TaskOS-Extension': '1' },
       body: JSON.stringify({ durationMinutes: Number(minutes.value) || ping, source }),
     })
     const data = await response.json()
@@ -308,7 +308,7 @@ async function createFromInput(kind) {
   const body = kind === 'task' ? { title, energyType: 'Light' } : { title }
   const response = await fetch(`${API}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-TaskOS-Extension': '1' },
     body: JSON.stringify(body),
   })
   const data = await response.json().catch(() => ({}))

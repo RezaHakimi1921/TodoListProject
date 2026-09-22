@@ -154,8 +154,8 @@ export function TaskReminderModal({ task, editReminderId = null, onClose }: Prop
   })
 
   const rows = listQuery.data ?? []
-  const pending = useMemo(() => rows.filter((row) => !row.firedAt), [rows])
-  const fired = useMemo(() => rows.filter((row) => row.firedAt), [rows])
+  const pending = useMemo(() => rows.filter((row) => !row.acknowledgedAt), [rows])
+  const fired = useMemo(() => rows.filter((row) => Boolean(row.acknowledgedAt)), [rows])
 
   const startEdit = (row: TaskReminder) => {
     const parts = fromReminder(row)

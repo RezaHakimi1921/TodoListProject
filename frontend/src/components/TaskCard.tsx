@@ -1,23 +1,25 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { 
-  CheckCircle2, 
-  Circle, 
-  Clock, 
-  AlertCircle, 
-  Play, 
-  Edit3, 
-  Trash2, 
-  Zap, 
+import {
+  CheckCircle2,
+  Circle,
+  Clock,
+  AlertCircle,
+  Play,
+  Edit3,
+  Trash2,
+  Zap,
   Feather,
   ChevronDown,
   RotateCcw,
   ExternalLink,
   Pin,
-  Bell
+  Bell,
+  XCircle,
 } from 'lucide-react'
 import { finishFocus, getFocus } from '../api/focus'
 import { deleteTask, setTaskPinned, updateTask, updateTaskStatus } from '../api/tasks'
+import { markTaskNotificationsRead } from '../api/notifications'
 import { requestTaskFocus } from '../lib/focusSwitch'
 import { onFocusedTaskDone } from '../lib/resumePreviousFocus'
 import { TagChipList } from './TagChips'
@@ -25,25 +27,30 @@ import { useTrashConfirm } from './ConfirmProvider'
 import type { TaskItem, TaskStatus } from '../types'
 import { FOCUS_PAUSED_REASON, isFocusPaused, ownerLabel, statusLabel } from '../types'
 import { taskJiraKey, taskJiraUrl } from '../lib/jira'
+import { isJiraCancelledStatus, isJiraClosedStatus } from '../api/jira'
 import { TaskProblemLinks } from './TaskProblemLinks'
 
 interface Props {
   key?: string | number
   task: TaskItem
+  /** Exact live Jira status name when known */
+  jiraStatus?: string | null
   onOpenDrawer: (task: TaskItem) => void
   onOpenAging: (task: TaskItem) => void
   onOpenReminder?: (task: TaskItem) => void
 }
 
-export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Props) {
+export function TaskCard({ task, jiraStatus, onOpenDrawer, onOpenAging, onOpenReminder }: Props) {
   const queryClient = useQueryClient()
   const askTrash = useTrashConfirm()
   const [showStatusMenu, setShowStatusMenu] = useState(false)
   const [statusError, setStatusError] = useState('')
   const pinned = Boolean(task.pinned)
-  const hasReminder = (task.reminderCount ?? 0) > 0 || Boolean(task.nextReminderAt)
-  const unreadReminders = task.unreadReminderCount ?? 0
-  const hasUnreadReminder = unreadReminders > 0
+  const activeReminderCount = task.reminderCount ?? 0
+  const hasReminder = activeReminderCount > 0 || Boolean(task.nextReminderAt)
+  const unreadReminders = Math.max(task.unreadReminderCount ?? 0, activeReminderCount)
+  // Pulse stays until یادآور is marked دیده شد (ack clears reminderCount).
+  const hasUnreadReminder = hasReminder
 
   useEffect(() => {
     if (!showStatusMenu) return
@@ -56,6 +63,11 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
   const isPaused = isFocusPaused(task)
   const isDoing = task.status === 'Doing'
   const isStuck = task.status === 'Stuck' && !isPaused
+  const jiraName = (jiraStatus || '').trim()
+  const isCancelled = Boolean(jiraName && isJiraCancelledStatus(jiraName))
+  const isJiraClosed = Boolean(jiraName && isJiraClosedStatus(jiraName))
+  const closedLike = isDone || isJiraClosed
+  const statusChipLabel = jiraName || statusLabel(task)
 
   const applyStatus = (next: TaskStatus, stuckReason?: string) => {
     setStatusError('')
@@ -76,10 +88,13 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
         }
         setShowStatusMenu(false)
         if (next === 'Done') {
+          await markTaskNotificationsRead(task.id).catch(() => undefined)
           const cached = queryClient.getQueryData<TaskItem[]>(['tasks'])
           await onFocusedTaskDone(task.id, cached)
           void queryClient.invalidateQueries({ queryKey: ['focus'] })
           void queryClient.invalidateQueries({ queryKey: ['notifications'] })
+          void queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] })
+          void queryClient.invalidateQueries({ queryKey: ['reminders'] })
         } else if (next === 'Stuck') {
           const focus = await getFocus().catch(() => null)
           if (focus?.taskId === task.id) {
@@ -94,10 +109,16 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
   }
 
   const focusMutation = useMutation({
-    mutationFn: () => requestTaskFocus(task),
+    mutationFn: async () => {
+      if (task.status !== 'Doing') {
+        await updateTaskStatus(task.id, { status: 'Doing' })
+      }
+      await requestTaskFocus(task)
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['focus'] })
       void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      void queryClient.invalidateQueries({ queryKey: ['task', task.id] })
       void queryClient.invalidateQueries({ queryKey: ['worklogs'] })
     },
   })
@@ -135,12 +156,14 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
       className={`group relative rounded-xl border p-3.5 sm:p-4 transition-all duration-200 ${
         showStatusMenu ? 'z-[70]' : ''
       } ${
-        pinned
+        hasUnreadReminder && !closedLike
+          ? 'task-reminder-pulse border-violet-400/75 bg-violet-500/[0.1] hover:border-violet-300'
+          : pinned
           ? 'border-amber-400/70 bg-amber-400/[0.08] shadow-lg shadow-amber-950/30 hover:-translate-y-1 hover:border-amber-300'
-          : hasUnreadReminder
-          ? 'border-violet-400/70 bg-violet-500/[0.1] shadow-md shadow-violet-950/25 hover:-translate-y-0.5 hover:border-violet-300'
-          : isDone
-          ? 'border-white/[0.04] bg-black/20 opacity-55 hover:opacity-80'
+          : closedLike
+          ? isCancelled
+            ? 'border-rose-500/20 bg-rose-950/20 opacity-55 hover:opacity-80'
+            : 'border-white/[0.04] bg-black/20 opacity-55 hover:opacity-80'
           : isDoing
           ? 'border-white/20 bg-[#121623] shadow-md shadow-black/30 hover:-translate-y-0.5'
           : isStuck
@@ -160,7 +183,9 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
           }`}
           title={isDone ? 'علامت به عنوان انجام‌نشده' : 'علامت به عنوان انجام‌شده'}
         >
-          {isDone ? (
+          {isCancelled ? (
+            <XCircle className="w-4 h-4 text-rose-400" />
+          ) : isDone ? (
             <CheckCircle2 className="w-4 h-4 fill-emerald-500/20" />
           ) : (
             <Circle className="w-4 h-4 stroke-[1.75]" />
@@ -190,7 +215,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
             {hasUnreadReminder ? (
               <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-violet-500/25 text-violet-50 border border-violet-300/50">
                 <Bell className="w-3 h-3" />
-                {unreadReminders} یادآوری ندیده‌شده
+                {unreadReminders} یادآوری فعال
               </span>
             ) : hasReminder ? (
               <span className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-200/80 border border-violet-500/20">
@@ -218,18 +243,20 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
                   setShowStatusMenu((v) => !v)
                 }}
                 className={`inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded border transition-colors ${
-                  isDoing
+                  isCancelled
+                    ? 'bg-rose-500/15 text-rose-200 border-rose-500/30'
+                    : isDoing
                     ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                     : isPaused
                     ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                     : isStuck
                     ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                    : isDone
-                    ? 'bg-white/[0.04] text-slate-500 border-white/[0.06]'
+                    : closedLike
+                    ? 'bg-emerald-500/10 text-emerald-200/80 border-emerald-500/20'
                     : 'bg-white/[0.03] text-slate-300 border-white/[0.08] hover:border-white/20'
                 }`}
               >
-                <span>{statusLabel(task)}</span>
+                <span>{statusChipLabel}</span>
                 <ChevronDown className="w-2.5 h-2.5 opacity-50" />
               </button>
 
@@ -257,7 +284,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
               )}
             </div>
 
-            {task.rolledOver && !isDone && (
+            {task.rolledOver && !closedLike && (
               <span 
                 className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.08] text-slate-400"
                 title="این کار از روزهای قبل منتقل شده است"
@@ -267,7 +294,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
               </span>
             )}
 
-            {task.isAging && !isDone && (
+            {task.isAging && !closedLike && (
               <button
                 type="button"
                 onClick={() => onOpenAging(task)}
@@ -283,7 +310,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
           <h3
             onClick={() => onOpenDrawer(task)}
             className={`text-[13.5px] font-medium cursor-pointer transition-colors leading-relaxed ${
-              isDone
+              closedLike
                 ? 'line-through text-slate-500'
                 : 'text-slate-200 hover:text-white'
             }`}
@@ -336,7 +363,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
                 ? 'opacity-100 text-violet-300 bg-violet-500/15 hover:bg-violet-500/25'
                 : 'opacity-100 text-slate-400 hover:text-violet-300 hover:bg-white/[0.06] md:opacity-0 md:-translate-y-1 md:group-hover:opacity-100 md:group-hover:translate-y-0'
             }`}
-            title={hasUnreadReminder ? `${unreadReminders} یادآوری ندیده‌شده` : 'یادآوری'}
+            title={hasUnreadReminder ? `${unreadReminders} یادآوری فعال` : 'یادآوری'}
           >
             <Bell className={`w-3.5 h-3.5 ${hasUnreadReminder || hasReminder ? 'fill-violet-300/30' : ''}`} />
             {hasUnreadReminder ? (
@@ -361,7 +388,7 @@ export function TaskCard({ task, onOpenDrawer, onOpenAging, onOpenReminder }: Pr
             <Pin className={`w-3.5 h-3.5 ${pinned ? 'fill-amber-300' : ''}`} />
           </button>
 
-          {!isDone && (
+          {!closedLike && (
             <button
               id={`btn-start-focus-${task.id}`}
               type="button"

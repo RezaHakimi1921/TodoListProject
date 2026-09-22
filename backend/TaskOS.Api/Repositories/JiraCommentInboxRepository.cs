@@ -197,7 +197,8 @@ public sealed class JiraCommentInboxRepository : IJiraCommentInboxRepository
             UPDATE JiraCommentInbox
             SET SeenAt = @SeenAt
             WHERE SeenAt IS NULL
-              AND (upper(JiraKey) = @JiraKey OR CommentId = 'new-task:' || @JiraKey)
+              AND upper(JiraKey) = @JiraKey
+              AND CommentId NOT LIKE 'new-task:%'
             """,
             new { JiraKey = key, SeenAt = seenAt });
     }

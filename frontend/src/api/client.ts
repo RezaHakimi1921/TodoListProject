@@ -20,9 +20,9 @@ async function probeBackend(): Promise<boolean> {
     try {
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 1500)
-      let res = await fetch('/api/health', { signal: controller.signal })
+      let res = await fetch('/api/health', { signal: controller.signal, credentials: 'include' })
       if (res.status === 404) {
-        res = await fetch('/api/settings', { signal: controller.signal })
+        res = await fetch('/api/settings', { signal: controller.signal, credentials: 'include' })
       }
       clearTimeout(timeout)
       backendAvailable = res.ok
@@ -42,6 +42,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // Prefer the real request first so cold load is not blocked by a health RTT.
   try {
     const response = await fetch(path, {
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...(init?.headers ?? {}),
@@ -49,6 +50,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
     })
     backendAvailable = true
+    if (response.status === 401 && !path.includes('/api/auth/')) {
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+        window.location.assign('/login')
+      }
+      throw new ApiError('نیاز به ورود', 401)
+    }
     if (response.status === 204) {
       return undefined as T
     }
@@ -69,6 +76,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     // One retry after a transient network blip.
     const response = await fetch(path, {
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...(init?.headers ?? {}),

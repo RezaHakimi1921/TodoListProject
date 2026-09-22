@@ -1,4 +1,6 @@
 using System.Net.Http.Headers;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using TaskOS.Api.Data;
 using TaskOS.Api.Repositories;
 using TaskOS.Api.Services;
@@ -27,11 +29,40 @@ if (!args.Any(argument => argument.Contains("urls", StringComparison.OrdinalIgno
         pushOnly ? "http://[::1]:5108" : "http://[::1]:5088");
 }
 
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddControllers();
+builder.Services.AddAuthentication(AuthService.CookieScheme)
+    .AddCookie(AuthService.CookieScheme, options =>
+    {
+        options.Cookie.Name = "taskos_auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.SlidingExpiration = true;
+        options.ExpireTimeSpan = TimeSpan.FromDays(30);
+        options.Events.OnRedirectToLogin = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        };
+        options.Events.OnRedirectToAccessDenied = context =>
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        };
+    });
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
-        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod());
+        policy.SetIsOriginAllowed(_ => true)
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials());
 });
 builder.Services.AddHttpClient<IJiraRestClient, JiraRestClient>((sp, client) =>
 {
@@ -64,6 +95,7 @@ builder.Services.AddScoped<IDailyLogService, DailyLogService>();
 builder.Services.AddScoped<IWorkLogService, WorkLogService>();
 builder.Services.AddScoped<IProblemService, ProblemService>();
 builder.Services.AddScoped<ITrashService, TrashService>();
+builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<IFocusService, FocusService>();
 builder.Services.AddScoped<ISettingsService, SettingsService>();
 builder.Services.AddScoped<IWorkPingService, WorkPingService>();
@@ -73,6 +105,7 @@ builder.Services.AddScoped<IJiraCommentInboxService, JiraCommentInboxService>();
 builder.Services.AddScoped<ITaskReminderRepository, TaskReminderRepository>();
 builder.Services.AddScoped<ITaskReminderService, TaskReminderService>();
 builder.Services.AddSingleton<IPushNotificationService, PushNotificationService>();
+builder.Services.AddSingleton<IAuthService, AuthService>();
 builder.Services.AddScoped<JiraDoneCommentService>();
 if (pushOnly)
 {
@@ -80,15 +113,17 @@ if (pushOnly)
 }
 else
 {
-    // WorkPingHostedService removed — no periodic focus reminders.
     builder.Services.AddHostedService<IncomingPsSyncHostedService>();
     builder.Services.AddHostedService<JiraWatchHostedService>();
     builder.Services.AddHostedService<JiraDoneCommentHostedService>();
     builder.Services.AddHostedService<TaskReminderHostedService>();
+    // Relay covers SeedRecent inserts and any inbox row that skipped SafePush.
+    builder.Services.AddHostedService<PushInboxRelayHostedService>();
 }
 
 var app = builder.Build();
 app.Services.GetRequiredService<DatabaseInitializer>().Initialize();
+await app.Services.GetRequiredService<IAuthService>().EnsureSeedUserAsync();
 if (!pushOnly)
 {
     try
@@ -101,6 +136,9 @@ if (!pushOnly)
     }
 }
 app.UseCors();
+app.UseAuthentication();
+app.UseMiddleware<LoopbackLocalAuthMiddleware>();
+app.UseAuthorization();
 app.MapGet("/", () => Results.Content(
     """
     <!doctype html>
@@ -118,6 +156,6 @@ app.MapGet("/", () => Results.Content(
     </html>
     """,
     "text/html; charset=utf-8"));
-app.MapGet("/api/health", () => Results.Ok(new { ok = true, api = "http://127.0.0.1:5088" }));
+app.MapGet("/api/health", () => Results.Ok(new { ok = true, api = "http://127.0.0.1:5088" })).AllowAnonymous();
 app.MapControllers();
 app.Run();

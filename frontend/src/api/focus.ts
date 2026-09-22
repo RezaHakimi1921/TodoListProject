@@ -30,10 +30,12 @@ function pending(row: Record<string, unknown> | null | undefined): JiraSwitchPen
   const remaining = Number(row.remainingSeconds)
   const sinceUnixMs = Number(row.sinceUnixMs)
   if (Number.isFinite(sinceUnixMs) && sinceUnixMs > 0) {
+    const fromServer = Number.isFinite(remaining) ? Math.max(0, Math.round(remaining)) : null
+    const fromClock = Math.max(0, Math.ceil((JIRA_DWELL_MS - (Date.now() - sinceUnixMs)) / 1000))
     return {
       jiraKey: key,
       title: String(row.title ?? key),
-      remainingSeconds: Math.max(0, Math.ceil((JIRA_DWELL_MS - (Date.now() - sinceUnixMs)) / 1000)),
+      remainingSeconds: fromServer ?? fromClock,
       sinceUnixMs,
       taskId: row.taskId == null ? null : Number(row.taskId),
     }
@@ -96,8 +98,19 @@ export function clearFocus() {
   return api.delete('/api/focus').then(() => getFocus())
 }
 
-export function startRest(description?: string, note?: string) {
-  return api.post<Record<string, unknown>>('/api/focus/rest', { description, note }).then(camel)
+export function startRest(
+  description?: string,
+  note?: string,
+  options?: { jiraKey?: string; jiraUrl?: string | null },
+) {
+  return api
+    .post<Record<string, unknown>>('/api/focus/rest', {
+      description,
+      note,
+      jiraKey: options?.jiraKey,
+      jiraUrl: options?.jiraUrl,
+    })
+    .then(camel)
 }
 
 export function saveRestNote(note?: string) {

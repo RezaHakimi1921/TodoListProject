@@ -17,6 +17,7 @@ public sealed class JiraStartRequest
     public int? DurationMinutes { get; set; }
     public string? EnergyType { get; set; }
     public string? Ownership { get; set; }
+    public bool NotifyNewTask { get; set; }
 }
 
 public sealed class JiraCreateTaskRequest

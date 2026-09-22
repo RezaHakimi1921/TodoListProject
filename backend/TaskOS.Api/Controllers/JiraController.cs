@@ -99,7 +99,8 @@ public sealed class JiraController : ControllerBase
                 JiraUrl = created.BrowseUrl,
                 Title = created.Summary,
                 EnergyType = request.EnergyType,
-                Ownership = ownership
+                Ownership = ownership,
+                NotifyNewTask = false,
             });
 
             return Ok(new
@@ -254,6 +255,58 @@ public sealed class JiraController : ControllerBase
     {
         var closed = await _doneSync.TryCloseFromJiraAsync(key, cancellationToken);
         return Ok(new { closed });
+    }
+
+    [HttpGet("issue-states")]
+    public async Task<IActionResult> IssueStates([FromQuery] string? keys, CancellationToken cancellationToken)
+    {
+        var list = (keys ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        if (list.Count == 0) return Ok(Array.Empty<object>());
+        try
+        {
+            var rows = await _jiraRest.SearchIssueStatesAsync(list, cancellationToken);
+            return Ok(rows.Select(r => new {
+                key = r.Key,
+                status = r.Status,
+                assignee = string.IsNullOrWhiteSpace(r.AssigneeName) && string.IsNullOrWhiteSpace(r.AssigneeDisplay)
+                    ? null
+                    : new { name = r.AssigneeName, displayName = r.AssigneeDisplay },
+                creator = string.IsNullOrWhiteSpace(r.CreatorName) && string.IsNullOrWhiteSpace(r.CreatorDisplay)
+                    ? null
+                    : new { name = r.CreatorName, displayName = r.CreatorDisplay },
+            }));
+        }
+        catch (JiraRestException)
+        {
+            return StatusCode(502, new { error = "خواندن وضعیت جیرا انجام نشد" });
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(502, new { error = "خواندن وضعیت جیرا انجام نشد" });
+        }
+    }
+
+    [HttpGet("issues/{key}/thread")]
+    public async Task<IActionResult> GetThread(string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _jiraRest.GetIssueThreadAsync(key, cancellationToken));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (JiraRestException)
+        {
+            return StatusCode(502, new { error = "خواندن کامنت‌های جیرا انجام نشد" });
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(502, new { error = "خواندن کامنت‌های جیرا انجام نشد" });
+        }
     }
 
     [HttpPost("issues/{key}/comments")]

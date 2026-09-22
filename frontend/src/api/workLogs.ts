@@ -20,6 +20,11 @@ export function listWorkLogs(date: string) {
   return api.get<WorkLogEntry[]>(`/api/worklogs?date=${encodeURIComponent(date)}`)
 }
 
+export function listWorkLogsRange(from: string, to: string) {
+  const params = new URLSearchParams({ from, to })
+  return api.get<WorkLogEntry[]>(`/api/worklogs?${params.toString()}`)
+}
+
 export function getWorkLogSummary(date: string) {
   return api.get<WorkLogSummary>(`/api/worklogs/summary?date=${encodeURIComponent(date)}`)
 }

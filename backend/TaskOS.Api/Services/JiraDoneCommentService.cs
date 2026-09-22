@@ -211,56 +211,10 @@ public sealed class JiraDoneCommentService
 
     private void Notify(TaskDto task, JiraIssueComments issue, JiraCommentItem comment)
     {
-        var snippet = TrimBody(comment.Body);
-        var author = string.IsNullOrWhiteSpace(comment.AuthorName) ? "کسی" : comment.AuthorName;
-        try
-        {
-            WindowsToast.Show("TaskOS", $"این تسک دان شده، کامنت جدید گذاشته شده\n{task.Title}\n{author}: {snippet}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Done-comment toast failed for {Key}", issue.Key);
-        }
-
-        if (Interlocked.CompareExchange(ref _open, 1, 0) != 0)
-        {
-            return;
-        }
-
-        var taskTitle = task.Title;
-        var jiraKey = issue.Key;
-        var jiraUrl = task.JiraUrl ?? $"https://jira.smartx.ir/browse/{issue.Key}";
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                var choice = DoneCommentForm.ShowCentered(taskTitle, $"{author}: {snippet}");
-                if (choice != DoneCommentChoice.ReturnToTask)
-                {
-                    return;
-                }
-
-                using var scope = _scopes.CreateScope();
-                var settings = scope.ServiceProvider.GetRequiredService<ISettingsService>().GetAsync().GetAwaiter().GetResult();
-                var jira = scope.ServiceProvider.GetRequiredService<IJiraLinkService>();
-                jira.StartAsync(new JiraStartRequest
-                {
-                    JiraKey = jiraKey,
-                    JiraUrl = jiraUrl,
-                    Title = taskTitle,
-                    FinishPrevious = true,
-                    DurationMinutes = settings.PingMinutes
-                }).GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Done-comment form failed for {Key}", jiraKey);
-            }
-            finally
-            {
-                Interlocked.Exchange(ref _open, 0);
-            }
-        });
+        // Windows Form / toast for Done-task comments disabled — inbox + ntfy cover this.
+        _ = task;
+        _ = issue;
+        _ = comment;
     }
 
     private async Task<long> ReadCursorAsync(string key)

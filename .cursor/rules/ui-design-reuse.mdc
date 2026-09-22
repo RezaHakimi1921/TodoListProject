@@ -13,8 +13,9 @@ When adding or changing frontend UI in this project:
 2. **Date picking** — use `JalaliDateField` / `JalaliMonthCalendar` (same as dashboard day picker / PastDaysMenu). Do **not** use `input type="datetime-local"` or browser-native scroll time wheels.
 3. **Time picking** — use styled `<select>` (or the same control language as existing forms), not scroll spinners.
 4. **Modals** — follow `AgingModal` / `TaskReminderModal`: `fixed inset-0`, `bg-black/70 backdrop-blur`, rounded-2xl/`#141824` panel, RTL.
-5. **Colors** — stick to established accents: amber (priority/focus), sky (comments), teal (khadang), violet (reminders), rose (danger). Do not introduce loud one-off themes.
+5. **Colors** — accents: amber (priority/focus), sky (comments / my bubbles), teal (khadang), violet (reminders / team-others), rose (danger). Never paint «من» like خدنگ. No loud one-off themes.
 6. **Nav / mobile** — hamburger is an overlay drawer (`fixed` + scrim); desktop keeps the top nav strip.
 7. **Lists** — long lists (notifications, reminders, “all …” tabs) need client pagination (~15–20 per page).
+8. **Task detail density** — for `/tasks/:id`, comment thread, focus banner: follow `task-detail-density.mdc` (compact chips, Jira key+creator in one meta row).
 
 If a new surface cannot reuse an existing piece, extend that piece instead of forking a parallel design.

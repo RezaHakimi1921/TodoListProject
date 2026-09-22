@@ -144,6 +144,20 @@ export function isJiraClosedStatus(name: string) {
   ].includes(value)
 }
 
+export function isJiraCancelledStatus(name: string) {
+  const value = name.trim().toLowerCase()
+  return (
+    value === 'canceled' ||
+    value === 'cancelled' ||
+    value === 'request cancelled' ||
+    value === 'request canceled' ||
+    value === 'not solvable' ||
+    value === 'لغو شده' ||
+    value.includes('cancel') ||
+    value.includes('لغو')
+  )
+}
+
 export interface JiraCommentAuthor {
   name?: string
   displayName?: string
@@ -159,6 +173,7 @@ export interface JiraIssueComment {
 }
 
 export interface JiraIssueThread {
+  status?: string
   reporter: JiraCommentAuthor | null
   assignee: JiraCommentAuthor | null
   creator: JiraCommentAuthor | null
@@ -191,36 +206,25 @@ function commentIsInternal(row: {
 }
 
 export function getJiraIssueThread(jiraKey: string) {
-  const key = encodeURIComponent(jiraKey)
-  return Promise.all([
-    fetch(`/jira-rest/rest/api/2/issue/${key}?fields=description,created,reporter,assignee,creator`),
-    fetch(`/jira-rest/rest/api/2/issue/${key}/comment?expand=properties&maxResults=100`),
-  ]).then(async ([issueRes, commentsRes]) => {
-    if (!issueRes.ok || !commentsRes.ok) throw new Error('jira comments failed')
-    const data = await issueRes.json()
-    const commentsPayload = await commentsRes.json()
-    const comments = Array.isArray(commentsPayload?.comments) ? commentsPayload.comments : []
+  return api.get<Record<string, unknown>>(`/api/jira/issues/${encodeURIComponent(jiraKey)}/thread`).then((data) => {
+    const comments = Array.isArray(data?.comments) ? data.comments : []
     return {
-      reporter: asJiraPerson(data?.fields?.reporter),
-      assignee: asJiraPerson(data?.fields?.assignee),
-      creator: asJiraPerson(data?.fields?.creator),
-      description: String(data?.fields?.description ?? ''),
-      created: String(data?.fields?.created ?? ''),
-      comments: comments.map(
-        (row: {
-          id?: string
-          body?: string
-          created?: string
-          author?: JiraCommentAuthor
-          properties?: Array<{ key?: string; value?: { internal?: boolean; allow?: boolean } }>
-        }) => ({
-          id: String(row.id ?? ''),
-          body: String(row.body ?? ''),
-          created: String(row.created ?? ''),
-          author: asJiraPerson(row.author) ?? undefined,
-          internal: commentIsInternal(row),
-        }),
-      ),
+      reporter: asJiraPerson(data?.reporter as JiraCommentAuthor | null),
+      assignee: asJiraPerson(data?.assignee as JiraCommentAuthor | null),
+      creator: asJiraPerson(data?.creator as JiraCommentAuthor | null),
+      description: String(data?.description ?? ''),
+      created: String(data?.created ?? ''),
+      status: String(data?.status ?? ''),
+      comments: comments.map((row: Record<string, unknown>) => ({
+        id: String(row.id ?? ''),
+        body: String(row.body ?? ''),
+        created: String(row.created ?? ''),
+        author: {
+          name: String((row as { authorKey?: string }).authorKey ?? row.authorName ?? ''),
+          displayName: String(row.authorName ?? ''),
+        },
+        internal: Boolean(row.internal),
+      })),
     } as JiraIssueThread
   })
 }
@@ -253,11 +257,15 @@ export function isJiraMe(person?: JiraCommentAuthor | null) {
 }
 
 export function getJiraIssueStatus(jiraKey: string) {
-  return fetch(`/jira-rest/rest/api/2/issue/${encodeURIComponent(jiraKey)}?fields=status`).then(async (response) => {
-    if (!response.ok) throw new Error('jira status failed')
-    const data = await response.json()
-    return String(data?.fields?.status?.name ?? '')
-  })
+  const key = String(jiraKey || '').trim()
+  if (!key) return Promise.resolve('')
+  return searchJiraIssueStatuses([key]).then((rows) => {
+    const hit = rows.find((r) => r.key.toUpperCase() === key.toUpperCase())
+    if (hit?.status) return hit.status
+    return getJiraIssueThread(key).then((t) => String(t.status || '')).catch(() => '')
+  }).catch(() =>
+    getJiraIssueThread(key).then((t) => String(t.status || '')).catch(() => ''),
+  )
 }
 
 export function listJiraIssueWorklogs(jiraKey: string) {
@@ -275,25 +283,22 @@ export interface JiraIssueState {
 }
 
 export function searchJiraIssueStatuses(keys: string[]) {
-  const unique = [...new Set(keys.filter(Boolean))]
+  const unique = [...new Set(keys.filter(Boolean).map((k) => k.trim()).filter(Boolean))]
   if (unique.length === 0) return Promise.resolve([] as JiraIssueState[])
   const batches: string[][] = []
   for (let i = 0; i < unique.length; i += 40) batches.push(unique.slice(i, i + 40))
   return Promise.all(
-    batches.map((batch) => {
-      const jql = `key in (${batch.join(',')})`
-      return fetch(
-        `/jira-rest/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=status,assignee&maxResults=50`,
-      ).then(async (response) => {
-        if (!response.ok) throw new Error('jira search failed')
-        const data = await response.json()
-        return (Array.isArray(data?.issues) ? data.issues : []).map((issue: { key?: string; fields?: { status?: { name?: string }; assignee?: JiraCommentAuthor | null } }) => ({
-          key: String(issue.key ?? ''),
-          status: String(issue.fields?.status?.name ?? ''),
-          assignee: asJiraPerson(issue.fields?.assignee),
-        })) as JiraIssueState[]
-      })
-    }),
+    batches.map((batch) =>
+      api.get<Array<{ key?: string; status?: string; assignee?: JiraCommentAuthor | null }>>(
+        `/api/jira/issue-states?keys=${encodeURIComponent(batch.join(','))}`,
+      ).then((rows) =>
+        (Array.isArray(rows) ? rows : []).map((row) => ({
+          key: String(row.key ?? ''),
+          status: String(row.status ?? ''),
+          assignee: asJiraPerson(row.assignee),
+        })) as JiraIssueState[],
+      ),
+    ),
   ).then((rows) => rows.flat())
 }
 

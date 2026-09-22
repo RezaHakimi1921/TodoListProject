@@ -48,6 +48,8 @@ export interface TaskItem {
   ownership?: TaskOwnership
   assigneeName?: string | null
   assigneeDisplay?: string | null
+  creatorName?: string | null
+  creatorDisplay?: string | null
   pinned?: boolean
   nextReminderAt?: string | null
   reminderCount?: number
@@ -193,6 +195,8 @@ export function statusLabel(task: { status: TaskStatus; stuckReason?: string | n
 export function ownerLabel(task: {
   ownership?: TaskOwnership
   assigneeDisplay?: string | null
+  creatorName?: string | null
+  creatorDisplay?: string | null
   assigneeName?: string | null
 }) {
   if (task.ownership !== 'Other') return 'من'

@@ -1,0 +1,28 @@
+---
+description: >-
+  Compact density for Task detail (/tasks/:id), comment thread, and focus
+  banner meta — small controls, grouped Jira metadata, clear bubble colors.
+globs: frontend/src/pages/TaskDetailPage.tsx,frontend/src/components/TaskCommentThread.tsx,frontend/src/components/NowWorkingBanner.tsx,frontend/src/components/TaskEditorDrawer.tsx
+alwaysApply: false
+---
+
+# Task detail density (TaskOS)
+
+When editing the task workspace (`/tasks/:id`), comment thread, or focus banner:
+
+## Density
+1. **Compact by default** — prefer `text-[11px]`/`text-xs`, `px-2 py-1` / `py-1.5`, `gap-1.5`–`gap-2`, `rounded-lg`/`rounded-xl`. Avoid `p-4`+ and `py-3` primary actions on this surface.
+2. **One meta strip** — Jira key, creator, and open-in-Jira live in **one** inline row next to each other (not a separate hero block on the right).
+3. **Toolbar chips** — status / energy / ownership are chip or compact select height (~32px), not large padded cards.
+4. **Primary CTA once** — one small save button (`text-xs`, `px-3 py-1.5`); do not stack multiple full-width amber buttons.
+5. **Sections** — checklist / worklogs / comments share the same card chrome (`rounded-xl border … bg-[#141824] p-3`), not oversized panels.
+
+## Comments
+6. **Bubble colors (do not mix)** — mine = **sky**; khadang = **teal**; team-others = muted violet/slate; private = slate. Never paint «من» with khadang teal or the same loud violet as team-only noise.
+7. **Every bubble** gets a small **کپی متن** control (clipboard of plain/markdown body).
+8. Send actions stay as small chips (`px-2.5 py-1.5 text-[11px]`), not tall bars.
+
+## Banner
+9. Focus banner: clock + pause stay on the right; **creator sits beside the Jira key** in the left meta row.
+
+Reuse accents from `ui-design-reuse`: amber=focus/priority, sky=comments/me, teal=khadang, violet=reminders/team-internal (others), rose=danger.

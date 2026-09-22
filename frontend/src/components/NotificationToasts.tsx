@@ -8,12 +8,13 @@ import {
   TASK_NOTIFICATIONS_READ,
   type CommentNotification,
 } from '../api/notifications'
+import { acknowledgeTaskReminders } from '../api/reminders'
 import { isKhadangAgent } from '../api/jira'
 
 function isFreshNotification(item: CommentNotification) {
-  const at = Date.parse(item.createdAt)
+  const at = Date.parse(item.receivedAt || item.createdAt)
   if (!Number.isFinite(at)) return false
-  return Date.now() - at < 5 * 60 * 1000
+  return Date.now() - at < 15 * 60 * 1000
 }
 
 export function NotificationToasts() {
@@ -26,7 +27,7 @@ export function NotificationToasts() {
   const unreadQuery = useQuery({
     queryKey: ['notifications', 'unread-toast'],
     queryFn: () => listNotifications(true),
-    refetchInterval: 20_000,
+    refetchInterval: 8_000,
     staleTime: 8_000,
   })
 
@@ -78,7 +79,24 @@ export function NotificationToasts() {
     void markNotificationRead(item.id)
       .then(() => queryClient.invalidateQueries({ queryKey: ['notifications'] }))
       .catch(() => undefined)
-    if (item.taskId) navigate(`/tasks/${item.taskId}`)
+    if (item.kind === 'reminder' && item.taskId) {
+      const taskId = item.taskId
+      void acknowledgeTaskReminders(taskId)
+        .then(() => {
+          queryClient.setQueriesData({ queryKey: ['tasks'] }, (old: unknown) => {
+            if (!Array.isArray(old)) return old
+            return old.map((task: { id: number }) =>
+              task.id === taskId
+                ? { ...task, reminderCount: 0, unreadReminderCount: 0, nextReminderAt: null }
+                : task,
+            )
+          })
+          void queryClient.invalidateQueries({ queryKey: ['reminders'] })
+          void queryClient.invalidateQueries({ queryKey: ['tasks'] })
+        })
+        .catch(() => undefined)
+    }
+    if (item.taskId) navigate(`/tasks/${item.taskId}`, { state: { fromReminder: true } })
   }
 
   if (toasts.length === 0) return null
