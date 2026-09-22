@@ -15,7 +15,14 @@ import { isKhadangAgent } from '../api/jira'
 function isFreshNotification(item: CommentNotification) {
   const at = Date.parse(item.receivedAt || item.createdAt)
   if (!Number.isFinite(at)) return false
-  return Date.now() - at < 15 * 60 * 1000
+  // New Jira tasks stay toast-worthy longer — users often see ntfy first.
+  const windowMs = item.kind === 'new-task' ? 6 * 60 * 60 * 1000 : 15 * 60 * 1000
+  return Date.now() - at < windowMs
+}
+
+function shouldToastOnLoad(item: CommentNotification) {
+  if (item.kind === 'new-task' && !item.read) return true
+  return isFreshNotification(item)
 }
 
 export function NotificationToasts() {
@@ -54,7 +61,7 @@ export function NotificationToasts() {
         }
       }
       const recent = items
-        .filter(isFreshNotification)
+        .filter(shouldToastOnLoad)
         .filter((item) => !viewingTask || item.taskId !== viewingTaskId)
       if (recent.length > 0) setToasts(recent.slice(0, 4))
       return
@@ -75,6 +82,10 @@ export function NotificationToasts() {
           void queryClient.invalidateQueries({ queryKey: ['notifications'] })
         })
         .catch(() => undefined)
+    }
+    if (fresh.length > 0) {
+      void queryClient.invalidateQueries({ queryKey: ['notifications', 'unread-count'] })
+      void queryClient.invalidateQueries({ queryKey: ['notifications', 'all'] })
     }
     setToasts((prev) => {
       const kept = prev.filter((row) => unreadIds.has(row.id))

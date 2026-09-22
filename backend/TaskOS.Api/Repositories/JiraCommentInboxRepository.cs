@@ -28,7 +28,7 @@ public sealed class JiraCommentInboxRepository : IJiraCommentInboxRepository
             LEFT JOIN Task t ON t.Id = i.TaskId AND t.DeletedAt IS NULL
             LEFT JOIN TaskJira j ON j.TaskId = i.TaskId
             WHERE (@UnreadOnly = 0 OR i.SeenAt IS NULL)
-            ORDER BY i.CreatedAt DESC, i.Id DESC
+            ORDER BY COALESCE(i.ReceivedAt, i.CreatedAt) DESC, i.Id DESC
             LIMIT 200
             """;
         using var connection = _factory.Create();
@@ -155,8 +155,16 @@ public sealed class JiraCommentInboxRepository : IJiraCommentInboxRepository
     public async Task MarkReadByTaskAsync(int taskId, string seenAt)
     {
         using var connection = _factory.Create();
+        // Keep new-task badges until the user opens them in the inbox / toast.
+        // Status changes should clear comments only — otherwise ntfy arrives but the app badge vanishes.
         await connection.ExecuteAsync(
-            "UPDATE JiraCommentInbox SET SeenAt = @SeenAt WHERE TaskId = @TaskId AND SeenAt IS NULL",
+            """
+            UPDATE JiraCommentInbox
+            SET SeenAt = @SeenAt
+            WHERE TaskId = @TaskId
+              AND SeenAt IS NULL
+              AND CommentId NOT LIKE 'new-task:%'
+            """,
             new { TaskId = taskId, SeenAt = seenAt });
     }
 

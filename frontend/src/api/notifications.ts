@@ -51,7 +51,7 @@ function camel(row: Record<string, unknown>): CommentNotification {
     authorName: String(row.authorName ?? ''),
     body: String(row.body ?? ''),
     createdAt: String(row.createdAt ?? ''),
-    receivedAt: row.receivedAt ? String(row.receivedAt) : undefined,
+    receivedAt: row.receivedAt ? String(row.receivedAt) : (row.ReceivedAt ? String(row.ReceivedAt) : undefined),
     read: Boolean(row.read),
   }
 }

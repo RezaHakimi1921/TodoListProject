@@ -118,6 +118,7 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
         AuthorName = entry.AuthorName,
         Body = IsNewTask(entry.CommentId) ? "تسک جدید ثبت شد" : entry.Body,
         CreatedAt = entry.CreatedAt,
+        ReceivedAt = entry.ReceivedAt,
         Read = !string.IsNullOrWhiteSpace(entry.SeenAt)
     };
 

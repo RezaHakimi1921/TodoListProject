@@ -50,8 +50,8 @@ export function Layout() {
   const unreadQuery = useQuery({
     queryKey: ['notifications', 'unread-count'],
     queryFn: () => getUnreadNotificationCount(),
-    refetchInterval: 30_000,
-    staleTime: 10_000,
+    refetchInterval: 8_000,
+    staleTime: 4_000,
   })
   const pendingRemindersQuery = useQuery({
     queryKey: ['reminders', 'pending'],

@@ -13,6 +13,7 @@ public sealed class NotificationDto
     public string AuthorName { get; set; } = string.Empty;
     public string Body { get; set; } = string.Empty;
     public string CreatedAt { get; set; } = string.Empty;
+    public string? ReceivedAt { get; set; }
     public bool Read { get; set; }
 }
 
