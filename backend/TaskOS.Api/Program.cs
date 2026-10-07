@@ -117,7 +117,7 @@ else
     builder.Services.AddHostedService<JiraWatchHostedService>();
     builder.Services.AddHostedService<JiraDoneCommentHostedService>();
     builder.Services.AddHostedService<TaskReminderHostedService>();
-    // Relay covers SeedRecent inserts and any inbox row that skipped SafePush.
+    // Sole ntfy/WebPush path for inbox rows (insert must not SafePush — duplicates).
     builder.Services.AddHostedService<PushInboxRelayHostedService>();
 }
 

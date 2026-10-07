@@ -22,6 +22,14 @@ function looksLikeCodeLine(text: string) {
   return false
 }
 
+/** Keep Enter (single newlines) visible — CommonMark otherwise collapses them. */
+function withHardBreaks(md: string) {
+  const chunks = md.split(/(```[\s\S]*?```)/g)
+  return chunks
+    .map((chunk, i) => (i % 2 === 1 ? chunk : chunk.replace(/([^\n])\n(?!\n)/g, '$1  \n')))
+    .join('')
+}
+
 function CodeBlock({ lang, text }: { lang?: string; text: string }) {
   return (
     <div className="my-1.5 overflow-hidden rounded-lg border border-amber-400/25 bg-[#080a10] text-start" dir="ltr">
@@ -36,13 +44,13 @@ function CodeBlock({ lang, text }: { lang?: string; text: string }) {
 }
 
 export function MarkdownBody({ text, className = '', compact = false }: Props) {
-  const md = toCommentMarkdown(text)
+  const md = withHardBreaks(toCommentMarkdown(text))
   if (!md) return null
 
   return (
     <div
       className={
-        `markdown-body text-slate-200 break-words [&_p]:my-1 [&_p]:leading-relaxed ` +
+        `markdown-body text-slate-200 break-words [&_p]:my-1 [&_p]:leading-relaxed [&_br]:block ` +
         `[&_h1]:text-sm [&_h1]:font-bold [&_h1]:text-slate-100 [&_h1]:mt-2 [&_h1]:mb-1 ` +
         `[&_h2]:text-sm [&_h2]:font-bold [&_h2]:text-slate-100 [&_h2]:mt-2 [&_h2]:mb-1 ` +
         `[&_h3]:text-xs [&_h3]:font-bold [&_h3]:text-slate-100 [&_h3]:mt-1.5 [&_h3]:mb-1 ` +

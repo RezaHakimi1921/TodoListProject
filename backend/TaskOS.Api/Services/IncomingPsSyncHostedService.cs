@@ -29,9 +29,36 @@ public sealed class IncomingPsSyncHostedService : BackgroundService
             var jiraRest = scope.ServiceProvider.GetRequiredService<IJiraRestClient>();
             var links = scope.ServiceProvider.GetRequiredService<IJiraLinkService>();
             var inbox = scope.ServiceProvider.GetRequiredService<IJiraCommentInboxService>();
+            var repo = scope.ServiceProvider.GetRequiredService<Repositories.ITaskJiraRepository>();
+            var recent = await jiraRest.ListRecentOpenProductSupportAsync(stoppingToken);
+            var registered = 0;
+            foreach (var issue in recent)
+            {
+                if (await repo.GetByKeyAsync(issue.Key) is not null)
+                {
+                    continue;
+                }
+
+                var assigned = await jiraRest.AssignToMeAsync(issue.Key, stoppingToken);
+                await links.RegisterAsync(new Dtos.JiraStartRequest
+                {
+                    JiraKey = issue.Key,
+                    Title = issue.Summary,
+                    JiraUrl = $"https://jira.smartx.ir/browse/{issue.Key}",
+                    EnergyType = "Deep"
+                });
+                registered++;
+                _logger.LogInformation("Assigned={Assigned} and registered new {Key}", assigned, issue.Key);
+            }
+
             var issues = await jiraRest.ListUnassignedProductSupportAsync(stoppingToken);
             foreach (var issue in issues)
             {
+                if (await repo.GetByKeyAsync(issue.Key) is not null)
+                {
+                    continue;
+                }
+
                 await jiraRest.AssignToMeAsync(issue.Key, stoppingToken);
                 await links.RegisterAsync(new Dtos.JiraStartRequest
                 {
@@ -40,7 +67,8 @@ public sealed class IncomingPsSyncHostedService : BackgroundService
                     JiraUrl = $"https://jira.smartx.ir/browse/{issue.Key}",
                     EnergyType = "Deep"
                 });
-                _logger.LogInformation("Assigned and registered {Key}", issue.Key);
+                registered++;
+                _logger.LogInformation("Assigned and registered unassigned {Key}", issue.Key);
             }
 
             await inbox.SeedRecentNewTasksAsync();

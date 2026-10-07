@@ -47,6 +47,8 @@ export function toCommentMarkdown(raw?: string | null) {
   if (!raw) return ''
   let s = String(raw).replace(/\r\n/g, '\n')
 
+  // Jira wiki hard breaks (line\\) → markdown hard breaks
+  s = s.replace(/\\\\\n/g, '  \n')
   // Jira image / attachment markers
   s = s.replace(/!([^!\n]+)!/g, '*📎 تصویر*')
 

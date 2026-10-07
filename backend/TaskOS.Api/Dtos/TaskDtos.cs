@@ -87,3 +87,14 @@ public sealed class SimilarTaskDto
     public string? DoneAt { get; set; }
     public double Similarity { get; set; }
 }
+
+public sealed class RolloverDayRequest
+{
+    public string? Note { get; set; }
+}
+
+public sealed class RolloverDayResult
+{
+    public int RolledOverCount { get; set; }
+    public string Message { get; set; } = string.Empty;
+}

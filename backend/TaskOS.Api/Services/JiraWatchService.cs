@@ -28,13 +28,6 @@ public sealed class JiraWatchService : IJiraWatchService
 
         var title = string.IsNullOrWhiteSpace(request.Title) ? key : request.Title.Trim();
         var now = DateTime.UtcNow;
-        var incomingSince = request.SinceUnixMs > 0
-            ? DateTimeOffset.FromUnixTimeMilliseconds(request.SinceUnixMs).UtcDateTime
-            : now;
-        if (incomingSince > now)
-        {
-            incomingSince = now;
-        }
 
         lock (_gate)
         {
@@ -60,11 +53,6 @@ public sealed class JiraWatchService : IJiraWatchService
                 {
                     return TryTransferAsync(cancellationToken);
                 }
-
-                if (incomingSince < current.SinceUtc)
-                {
-                    current.SinceUtc = incomingSince;
-                }
             }
             else
             {
@@ -73,7 +61,9 @@ public sealed class JiraWatchService : IJiraWatchService
                     Key = key,
                     Title = title,
                     Url = request.JiraUrl,
-                    SinceUtc = incomingSince,
+                    // شمارش از همین لحظه شروع می‌شود. زمان قدیمی افزونه باعث می‌شد
+                    // جابه‌جایی همان لحظه انجام شود و بنر هیچ‌وقت مقصد را نشان ندهد.
+                    SinceUtc = now,
                     LastSeenUtc = now
                 };
                 _logger.LogInformation("Jira dwell started for {Key}", key);
@@ -140,9 +130,10 @@ public sealed class JiraWatchService : IJiraWatchService
         }
 
         var remaining = RemainingSeconds(snapshot.SinceUtc);
-        var title = match is not null && !string.IsNullOrWhiteSpace(match.Title)
-            ? match.Title
+        var title = match is not null && !IsBareTitle(match.Title, snapshot.Key)
+            ? match.Title!
             : snapshot.Title;
+        title = await ResolveBannerTitleAsync(snapshot.Key, title, cancellationToken);
         return new JiraSwitchPendingDto
         {
             JiraKey = snapshot.Key,
@@ -154,12 +145,12 @@ public sealed class JiraWatchService : IJiraWatchService
     }
 
     public Task TryTransferAsync(CancellationToken cancellationToken = default) =>
-        TransferSnapshotAsync(requireElapsed: true, ignoreRest: false, cancellationToken);
+        TransferSnapshotAsync(requireElapsed: true, ignoreRest: false, allowCreate: false, cancellationToken);
 
     public Task TransferNowAsync(CancellationToken cancellationToken = default) =>
-        TransferSnapshotAsync(requireElapsed: false, ignoreRest: true, cancellationToken);
+        TransferSnapshotAsync(requireElapsed: false, ignoreRest: true, allowCreate: true, cancellationToken);
 
-    private async Task TransferSnapshotAsync(bool requireElapsed, bool ignoreRest, CancellationToken cancellationToken)
+    private async Task TransferSnapshotAsync(bool requireElapsed, bool ignoreRest, bool allowCreate, CancellationToken cancellationToken)
     {
         WatchState? snapshot;
         lock (_gate)
@@ -202,6 +193,13 @@ public sealed class JiraWatchService : IJiraWatchService
                 return;
             }
 
+            // Glancing at an open ticket must not create a task. «منتقل بکن» does.
+            // A Done/closed ticket the user opened should still start so they can log time.
+            if (match is null && !allowCreate && !await IsClosedIssueAsync(scope, snapshot.Key, cancellationToken))
+            {
+                return;
+            }
+
             var jira = scope.ServiceProvider.GetRequiredService<IJiraLinkService>();
             await jira.StartAsync(new JiraStartRequest
             {
@@ -217,6 +215,73 @@ public sealed class JiraWatchService : IJiraWatchService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Jira dwell transfer failed for {Key}", snapshot.Key);
+        }
+    }
+
+    private async Task<string> ResolveBannerTitleAsync(string key, string title, CancellationToken cancellationToken)
+    {
+        if (!IsBareTitle(title, key) || TitleAlreadyResolved(key))
+        {
+            return string.IsNullOrWhiteSpace(title) ? key : title;
+        }
+
+        string? summary = null;
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            summary = await scope.ServiceProvider.GetRequiredService<IJiraRestClient>().GetSummaryAsync(key, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Jira summary for banner {Key} failed", key);
+        }
+
+        var clean = string.IsNullOrWhiteSpace(summary) || IsBareTitle(summary, key) ? title : summary.Trim();
+        if (string.IsNullOrWhiteSpace(clean))
+        {
+            clean = key;
+        }
+
+        lock (_gate)
+        {
+            if (_watch is not null && string.Equals(_watch.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                _watch.Title = clean;
+                _watch.TitleResolved = true;
+            }
+        }
+
+        return clean;
+    }
+
+    private bool TitleAlreadyResolved(string key)
+    {
+        lock (_gate)
+        {
+            return _watch is not null
+                && string.Equals(_watch.Key, key, StringComparison.OrdinalIgnoreCase)
+                && _watch.TitleResolved;
+        }
+    }
+
+    private static bool IsBareTitle(string? title, string key)
+    {
+        var text = (title ?? string.Empty).Trim();
+        return text.Length == 0 || text.Equals(key, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<bool> IsClosedIssueAsync(IServiceScope scope, string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var jiraRest = scope.ServiceProvider.GetRequiredService<IJiraRestClient>();
+            var states = await jiraRest.SearchIssueStatesAsync([key], cancellationToken);
+            var state = states.FirstOrDefault(row => row.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+            return state is not null && JiraRestClient.IsClosedStatus(state.Status);
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 
@@ -275,6 +340,7 @@ public sealed class JiraWatchService : IJiraWatchService
         public DateTime LastSeenUtc { get; set; }
         public bool Transferred { get; set; }
         public bool Dismissed { get; set; }
+        public bool TitleResolved { get; set; }
 
         public WatchState Clone() => new()
         {
@@ -284,7 +350,8 @@ public sealed class JiraWatchService : IJiraWatchService
             SinceUtc = SinceUtc,
             LastSeenUtc = LastSeenUtc,
             Transferred = Transferred,
-            Dismissed = Dismissed
+            Dismissed = Dismissed,
+            TitleResolved = TitleResolved
         };
     }
 }

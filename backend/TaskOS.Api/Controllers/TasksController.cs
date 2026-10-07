@@ -12,13 +12,23 @@ public sealed class TasksController : ControllerBase
     private readonly ITaskChecklistService _checklist;
     private readonly ITrashService _trash;
     private readonly IProblemService _problems;
+    private readonly IDailyLogService _logs;
+    private readonly IFocusService _focus;
 
-    public TasksController(ITaskService tasks, ITaskChecklistService checklist, ITrashService trash, IProblemService problems)
+    public TasksController(
+        ITaskService tasks,
+        ITaskChecklistService checklist,
+        ITrashService trash,
+        IProblemService problems,
+        IDailyLogService logs,
+        IFocusService focus)
     {
         _tasks = tasks;
         _checklist = checklist;
         _trash = trash;
         _problems = problems;
+        _logs = logs;
+        _focus = focus;
     }
 
     [HttpGet]
@@ -55,6 +65,31 @@ public sealed class TasksController : ControllerBase
     {
         var task = await _tasks.GetAsync(id);
         return task is null ? NotFound() : Ok(await _problems.ListByTaskAsync(id));
+    }
+
+    [HttpPost("rollover")]
+    public async Task<ActionResult<RolloverDayResult>> Rollover([FromBody] RolloverDayRequest? request)
+    {
+        try
+        {
+            var note = string.IsNullOrWhiteSpace(request?.Note) ? "پایان روز کاری" : request!.Note.Trim();
+            await _logs.UpsertAsync(new UpsertDailyLogRequest
+            {
+                LogDate = TaskMapping.TodayLocal(),
+                Note = note,
+            });
+            await _focus.ClearAsync();
+            var open = await _tasks.ListAsync(null, null, null);
+            return Ok(new RolloverDayResult
+            {
+                RolledOverCount = open.Count,
+                Message = $"{open.Count} کار به روز بعد منتقل شد.",
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     [HttpPost]

@@ -93,6 +93,11 @@ public sealed class JiraController : ControllerBase
                 assignee,
                 cancellationToken);
 
+            if (JiraRestClient.IsSelf(assignee))
+            {
+                await _jiraRest.AssignToMeAsync(created.Key, cancellationToken);
+            }
+
             var registered = await _jira.RegisterAsync(new JiraStartRequest
             {
                 JiraKey = created.Key,

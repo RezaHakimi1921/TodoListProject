@@ -70,11 +70,7 @@ public sealed class JiraLinkService : IJiraLinkService
             await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = TaskStatuses.Doing });
             task = await _tasks.GetAsync(task.Id) ?? task;
         }
-        await TryAssignAsync(key);
-        if (registeredNew && !ActivityJira.IsActivity(key))
-        {
-            await _inbox.AddNewTaskAsync(task.Id, key, task.Title, task.CreatedAt);
-        }
+        await ClaimForMeAsync(key, task, force: registeredNew);
 
         var focus = await _focus.GetAsync();
         if (focus.Active && focus.TaskId == task.Id)
@@ -112,7 +108,7 @@ public sealed class JiraLinkService : IJiraLinkService
         var key = NormalizeKey(request.JiraKey, request.JiraUrl);
         var title = await ResolveTitleAsync(request.Title, key);
         var (task, registeredNew) = await EnsureLinkedTaskAsync(key, title, request.JiraUrl, request.EnergyType, request.Ownership);
-        await TryAssignAsync(key);
+        await ClaimForMeAsync(key, task, force: registeredNew);
         if (registeredNew && !ActivityJira.IsActivity(key))
         {
             await _inbox.AddNewTaskAsync(task.Id, key, task.Title, task.CreatedAt);
@@ -208,26 +204,33 @@ public sealed class JiraLinkService : IJiraLinkService
         return string.IsNullOrWhiteSpace(summary) ? key : summary.Trim();
     }
 
-    private async Task TryAssignAsync(string key)
+    private async Task ClaimForMeAsync(string key, TaskDto task, bool force)
     {
         if (!key.StartsWith("PS-", StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
 
-        var match = await _links.GetByKeyAsync(key);
-        if (match is not null)
+        // Keep explicit «دیگری» tasks alone unless this registration just created the TaskOS row.
+        if (!force && string.Equals(task.Ownership, TaskOwnerships.Other, StringComparison.OrdinalIgnoreCase))
         {
-            var task = await _tasks.GetAsync(match.TaskId);
-            if (task is not null && string.Equals(task.Ownership, TaskOwnerships.Other, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
+            return;
         }
 
         try
         {
-            await _jiraRest.AssignToMeAsync(key);
+            var assigned = await _jiraRest.AssignToMeAsync(key);
+            if (!assigned && !force)
+            {
+                return;
+            }
+
+            if (!string.Equals(task.Ownership, TaskOwnerships.Mine, StringComparison.OrdinalIgnoreCase))
+            {
+                await _tasks.SetOwnershipAsync(task.Id, TaskOwnerships.Mine);
+            }
+
+            await _links.SetAssigneeAsync(task.Id, "reza", "Reza Hakimi");
         }
         catch (Exception)
         {

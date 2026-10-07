@@ -22,7 +22,9 @@ public sealed class JiraRestClient : IJiraRestClient
     private static readonly Regex KeyPattern = new(@"^[A-Z][A-Z0-9]+-\d+$", RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
     private const string UnassignedJql =
         "project = PS AND assignee is EMPTY AND resolution is EMPTY";
-    private const string RecentJql = "project = PS AND updated >= -1d ORDER BY updated DESC";
+    private const string RecentCreatedJql =
+        "project = PS AND resolution is EMPTY AND created >= -7d ORDER BY created DESC";
+    private const string RecentJql = "project = PS AND updated >= -7d ORDER BY updated DESC";
     private const string CreateProject = "SIP";
 
     private readonly HttpClient _http;
@@ -32,10 +34,19 @@ public sealed class JiraRestClient : IJiraRestClient
         _http = http;
     }
 
+
+    /// <summary>Preserve Enter as Jira wiki hard breaks (\\) so line breaks survive in Jira and round-trip.</summary>
+    private static string ToJiraWikiCommentBody(string? body)
+    {
+        var text = (body ?? string.Empty).Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+        if (text.Length == 0) return text;
+        // Single newlines → wiki hard break; blank lines stay paragraph breaks.
+        return Regex.Replace(text, @"(?<!\n)\n(?!\n)", "\\\\\n");
+    }
     public async Task AddIssueCommentAsync(string jiraKey, string body, bool internalComment = false, CancellationToken cancellationToken = default)
     {
         var key = RequireKey(jiraKey);
-        var text = (body ?? string.Empty).Trim();
+        var text = ToJiraWikiCommentBody(body);
         if (text.Length == 0)
         {
             throw new ArgumentException("Comment body is required.");
@@ -168,10 +179,6 @@ public sealed class JiraRestClient : IJiraRestClient
     public async Task<bool> AssignToMeAsync(string jiraKey, CancellationToken cancellationToken = default)
     {
         var key = RequireKey(jiraKey);
-        if (!key.StartsWith("PS-", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
 
         using (var current = await _http.GetAsync(
             $"rest/api/2/issue/{Uri.EscapeDataString(key)}?fields=assignee",
@@ -188,9 +195,10 @@ public sealed class JiraRestClient : IJiraRestClient
                 ? assigneeEl
                 : default;
             var parsed = ReadAssignee(assignee);
-            if (parsed.Present)
+            // Already mine — nothing to do. Otherwise force-claim (new TaskOS tasks must land on reza).
+            if (parsed.Present && IsSelf(parsed.Name, parsed.Display))
             {
-                return IsSelf(parsed.Name, parsed.Display);
+                return true;
             }
         }
 
@@ -481,7 +489,8 @@ public sealed class JiraRestClient : IJiraRestClient
         using var response = await _http.GetAsync(url, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            return [];
+            var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new JiraRestException((int)response.StatusCode, raw);
         }
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
@@ -519,13 +528,14 @@ public sealed class JiraRestClient : IJiraRestClient
         return rows;
     }
 
-    public async Task<IReadOnlyList<JiraIssueComments>> ListRecentlyUpdatedProductSupportAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<JiraIssueRef>> ListRecentOpenProductSupportAsync(CancellationToken cancellationToken = default)
     {
-        var url = $"rest/api/2/search?jql={Uri.EscapeDataString(RecentJql)}&fields=summary,comment,status&maxResults=100";
+        var url = $"rest/api/2/search?jql={Uri.EscapeDataString(RecentCreatedJql)}&fields=summary,status&maxResults=50";
         using var response = await _http.GetAsync(url, cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            return [];
+            var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+            throw new JiraRestException((int)response.StatusCode, raw);
         }
 
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
@@ -534,7 +544,7 @@ public sealed class JiraRestClient : IJiraRestClient
             return [];
         }
 
-        var rows = new List<JiraIssueComments>();
+        var rows = new List<JiraIssueRef>();
         foreach (var issue in issues.EnumerateArray())
         {
             var key = issue.TryGetProperty("key", out var keyEl) ? keyEl.GetString() : null;
@@ -544,50 +554,111 @@ public sealed class JiraRestClient : IJiraRestClient
             }
 
             var fields = issue.TryGetProperty("fields", out var fieldsEl) ? fieldsEl : default;
+            var statusName = fields.ValueKind == JsonValueKind.Object
+                && fields.TryGetProperty("status", out var statusEl)
+                && statusEl.TryGetProperty("name", out var statusNameEl)
+                ? statusNameEl.GetString() ?? ""
+                : "";
+            if (IsClosedStatus(statusName))
+            {
+                continue;
+            }
+
             var summary = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("summary", out var summaryEl)
                 ? summaryEl.GetString()
                 : null;
-            var comments = new List<JiraCommentItem>();
-            if (fields.ValueKind == JsonValueKind.Object
-                && fields.TryGetProperty("comment", out var commentEl)
-                && commentEl.TryGetProperty("comments", out var list)
-                && list.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in list.EnumerateArray())
-                {
-                    var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
-                    if (string.IsNullOrWhiteSpace(id))
-                    {
-                        continue;
-                    }
+            rows.Add(new JiraIssueRef { Key = key.ToUpperInvariant(), Summary = summary?.Trim() ?? key });
+        }
 
-                    var author = item.TryGetProperty("author", out var authorEl) ? authorEl : default;
-                    comments.Add(new JiraCommentItem
-                    {
-                        Id = id,
-                        Body = item.TryGetProperty("body", out var bodyEl) ? bodyEl.GetString() ?? "" : "",
-                        Created = item.TryGetProperty("created", out var createdEl) ? createdEl.GetString() ?? "" : "",
-                        AuthorName = author.ValueKind == JsonValueKind.Object && author.TryGetProperty("displayName", out var nameEl)
-                            ? nameEl.GetString() ?? ""
-                            : "",
-                        AuthorKey = author.ValueKind == JsonValueKind.Object && author.TryGetProperty("name", out var keyNameEl)
-                            ? keyNameEl.GetString() ?? ""
-                            : ""
-                    });
-                }
+        return rows;
+    }
+
+    public async Task<IReadOnlyList<JiraCommentItem>> ListLatestCommentsAsync(string jiraKey, CancellationToken cancellationToken = default)
+    {
+        var key = RequireKey(jiraKey);
+        var orderedUrl =
+            $"rest/api/2/issue/{Uri.EscapeDataString(key)}/comment?orderBy={Uri.EscapeDataString("-created")}&maxResults=40";
+        var ordered = await TryReadCommentPageAsync(orderedUrl, cancellationToken);
+        if (ordered is not null && IsNewestFirst(ordered.Value.Comments))
+        {
+            return ordered.Value.Comments;
+        }
+
+        var head = await TryReadCommentPageAsync(
+            $"rest/api/2/issue/{Uri.EscapeDataString(key)}/comment?startAt=0&maxResults=1",
+            cancellationToken);
+        if (head is null)
+        {
+            return ordered?.Comments ?? [];
+        }
+
+        var start = Math.Max(0, head.Value.Total - 40);
+        var page = await TryReadCommentPageAsync(
+            $"rest/api/2/issue/{Uri.EscapeDataString(key)}/comment?startAt={start}&maxResults=40",
+            cancellationToken);
+        return page?.Comments ?? ordered?.Comments ?? [];
+    }
+
+    public async Task<IReadOnlyList<JiraIssueComments>> ListRecentlyUpdatedProductSupportAsync(CancellationToken cancellationToken = default)
+    {
+        var rows = new List<JiraIssueComments>();
+        var startAt = 0;
+        const int pageSize = 50;
+        while (rows.Count < 200)
+        {
+            var url = $"rest/api/2/search?jql={Uri.EscapeDataString(RecentJql)}&fields=summary,status&startAt={startAt}&maxResults={pageSize}";
+            using var response = await _http.GetAsync(url, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var raw = await response.Content.ReadAsStringAsync(cancellationToken);
+                throw new JiraRestException((int)response.StatusCode, raw);
             }
 
-            rows.Add(new JiraIssueComments
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(body))
             {
-                Key = key.ToUpperInvariant(),
-                Summary = summary?.Trim() ?? key,
-                Comments = comments,
-                Status = fields.ValueKind == JsonValueKind.Object
-                    && fields.TryGetProperty("status", out var statusEl)
-                    && statusEl.TryGetProperty("name", out var statusNameEl)
-                    ? statusNameEl.GetString() ?? ""
-                    : ""
-            });
+                break;
+            }
+
+            using var doc = JsonDocument.Parse(body);
+            if (!doc.RootElement.TryGetProperty("issues", out var issues) || issues.ValueKind != JsonValueKind.Array)
+            {
+                break;
+            }
+
+            var pageCount = 0;
+            foreach (var issue in issues.EnumerateArray())
+            {
+                pageCount++;
+                var key = issue.TryGetProperty("key", out var keyEl) ? keyEl.GetString() : null;
+                if (string.IsNullOrWhiteSpace(key) || !key.StartsWith("PS-", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var fields = issue.TryGetProperty("fields", out var fieldsEl) ? fieldsEl : default;
+                var summary = fields.ValueKind == JsonValueKind.Object && fields.TryGetProperty("summary", out var summaryEl)
+                    ? summaryEl.GetString()
+                    : null;
+                rows.Add(new JiraIssueComments
+                {
+                    Key = key.ToUpperInvariant(),
+                    Summary = summary?.Trim() ?? key,
+                    Comments = [],
+                    Status = fields.ValueKind == JsonValueKind.Object
+                        && fields.TryGetProperty("status", out var statusEl)
+                        && statusEl.TryGetProperty("name", out var statusNameEl)
+                        ? statusNameEl.GetString() ?? ""
+                        : ""
+                });
+            }
+
+            if (pageCount < pageSize)
+            {
+                break;
+            }
+
+            startAt += pageCount;
         }
 
         return rows;
@@ -803,6 +874,73 @@ public sealed class JiraRestClient : IJiraRestClient
 
         return users;
     }
+    private async Task<(int Total, List<JiraCommentItem> Comments)?> TryReadCommentPageAsync(string url, CancellationToken cancellationToken)
+    {
+        using var response = await _http.GetAsync(url, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+        var root = doc.RootElement;
+        var total = root.TryGetProperty("total", out var totalEl) && totalEl.TryGetInt32(out var totalVal)
+            ? totalVal
+            : 0;
+        var comments = new List<JiraCommentItem>();
+        if (root.TryGetProperty("comments", out var list) && list.ValueKind == JsonValueKind.Array)
+        {
+            comments.AddRange(ReadCommentItems(list));
+        }
+
+        return (total, comments);
+    }
+
+    private static bool IsNewestFirst(IReadOnlyList<JiraCommentItem> comments)
+    {
+        if (comments.Count < 2)
+        {
+            return true;
+        }
+
+        if (!DateTime.TryParse(comments[0].Created, out var first)
+            || !DateTime.TryParse(comments[^1].Created, out var last))
+        {
+            return false;
+        }
+
+        return first >= last;
+    }
+
+    private static List<JiraCommentItem> ReadCommentItems(JsonElement list)
+    {
+        var comments = new List<JiraCommentItem>();
+        foreach (var item in list.EnumerateArray())
+        {
+            var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                continue;
+            }
+
+            var author = item.TryGetProperty("author", out var authorEl) ? authorEl : default;
+            comments.Add(new JiraCommentItem
+            {
+                Id = id,
+                Body = item.TryGetProperty("body", out var bodyEl) ? bodyEl.GetString() ?? "" : "",
+                Created = item.TryGetProperty("created", out var createdEl) ? createdEl.GetString() ?? "" : "",
+                AuthorName = author.ValueKind == JsonValueKind.Object && author.TryGetProperty("displayName", out var nameEl)
+                    ? nameEl.GetString() ?? ""
+                    : "",
+                AuthorKey = author.ValueKind == JsonValueKind.Object && author.TryGetProperty("name", out var keyNameEl)
+                    ? keyNameEl.GetString() ?? ""
+                    : ""
+            });
+        }
+
+        return comments;
+    }
+
     private static JiraIssueComments? ParseIssueComments(JsonElement issue)
     {
         var key = issue.TryGetProperty("key", out var keyEl) ? keyEl.GetString() : null;

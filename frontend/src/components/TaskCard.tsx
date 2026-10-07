@@ -390,18 +390,16 @@ export function TaskCard({ task, jiraStatus, onOpenDrawer, onOpenAging, onOpenRe
             <Pin className={`w-3.5 h-3.5 ${pinned ? 'fill-amber-300' : ''}`} />
           </button>
 
-          {!closedLike && (
-            <button
-              id={`btn-start-focus-${task.id}`}
-              type="button"
-              onClick={() => focusMutation.mutate()}
-              disabled={focusMutation.isPending}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] transition-all min-w-8 opacity-100 md:opacity-60 md:group-hover:opacity-100"
-              title="شروع تمرکز عمیق روی این کار"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-            </button>
-          )}
+          <button
+            id={`btn-start-focus-${task.id}`}
+            type="button"
+            onClick={() => focusMutation.mutate()}
+            disabled={focusMutation.isPending}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-white/[0.06] transition-all min-w-8 opacity-100 md:opacity-60 md:group-hover:opacity-100"
+            title={closedLike ? 'شروع دوباره و ثبت زمان' : 'شروع تمرکز عمیق روی این کار'}
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+          </button>
 
           <button
             id={`btn-edit-task-${task.id}`}

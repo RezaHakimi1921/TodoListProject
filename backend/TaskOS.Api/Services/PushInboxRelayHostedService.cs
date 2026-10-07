@@ -39,7 +39,7 @@ public sealed class PushInboxRelayHostedService : BackgroundService
 
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(8), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
             }
             catch (OperationCanceledException)
             {

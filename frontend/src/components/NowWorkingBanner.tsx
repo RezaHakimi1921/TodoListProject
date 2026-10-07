@@ -55,13 +55,12 @@ function useStickyPending(
 
   if (incoming) {
     const prev = held.current
-    if (!prev || prev.jiraKey !== incoming.jiraKey) {
-      held.current = incoming
+    if (!prev || prev.jiraKey !== incoming.jiraKey || incoming.sinceUnixMs > prev.sinceUnixMs) {
+      held.current = { ...incoming, title: incoming.title || prev?.title || incoming.jiraKey }
     } else {
-      const since = Math.min(prev.sinceUnixMs || Infinity, incoming.sinceUnixMs || Infinity)
       held.current = {
         ...incoming,
-        sinceUnixMs: Number.isFinite(since) ? since : incoming.sinceUnixMs,
+        sinceUnixMs: prev.sinceUnixMs || incoming.sinceUnixMs,
         title: incoming.title || prev.title,
       }
     }
@@ -421,11 +420,15 @@ function PendingSwitchLine({
   }
 
   const seconds = pending.remainingSeconds
+  const when = seconds > 0 ? `${seconds} ثانیه دیگه می‌ری روی` : 'الان می‌ری روی'
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2">
-      <p className="pending-switch-msg text-[12px] leading-relaxed">
-        {seconds > 0 ? `${seconds} ثانیه دیگه به «${pending.title}» منتقل می‌شی` : `الان به «${pending.title}» منتقل می‌شی`}
-        <span className="pending-switch-key ms-1 text-[10px]">{pending.jiraKey}</span>
+      <p className="pending-switch-msg min-w-0 text-[13px] font-medium leading-relaxed">
+        {when}{' '}
+        <span className="font-bold">{pending.title}</span>
+        {pending.jiraKey && pending.jiraKey !== pending.title ? (
+          <span className="pending-switch-key ms-1 font-mono text-[11px]">{pending.jiraKey}</span>
+        ) : null}
       </p>
       <button
         type="button"

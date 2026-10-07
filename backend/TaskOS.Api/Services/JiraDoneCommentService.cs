@@ -40,6 +40,23 @@ public sealed class JiraDoneCommentService
 
     public async Task PollAsync(CancellationToken cancellationToken = default)
     {
+        if (Interlocked.CompareExchange(ref _open, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await PollCoreAsync(cancellationToken);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _open, 0);
+        }
+    }
+
+    private async Task PollCoreAsync(CancellationToken cancellationToken = default)
+    {
         await EnsureNotificationTicketAsync();
         var allLinked = (await _tasks.ListAsync(null, null, null))
             .Where(row => !string.IsNullOrWhiteSpace(row.JiraKey))
@@ -84,7 +101,8 @@ public sealed class JiraDoneCommentService
                 }
 
                 if (JiraRestClient.IsClosedStatus(state.Status)
-                    && !string.Equals(task.Status, "Done", StringComparison.OrdinalIgnoreCase))
+                    && !string.Equals(task.Status, "Done", StringComparison.OrdinalIgnoreCase)
+                    && !await IsActivelyFocusedAsync(task.Id))
                 {
                     await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = "Done" });
                     task = await _tasks.GetAsync(task.Id) ?? task;
@@ -138,14 +156,30 @@ public sealed class JiraDoneCommentService
             }
 
             if (JiraRestClient.IsClosedStatus(issue.Status)
-                && !string.Equals(task.Status, "Done", StringComparison.OrdinalIgnoreCase))
+                && !string.Equals(task.Status, "Done", StringComparison.OrdinalIgnoreCase)
+                && !await IsActivelyFocusedAsync(task.Id))
             {
                 await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = "Done" });
                 task = await _tasks.GetAsync(task.Id) ?? task;
             }
 
-            var newest = issue.Comments
+            IReadOnlyList<JiraCommentItem> commentRows = issue.Comments;
+            if (issue.Key.StartsWith("PS-", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    commentRows = await _jiraRest.ListLatestCommentsAsync(issue.Key, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Latest comments for {Key} failed", issue.Key);
+                    commentRows = issue.Comments;
+                }
+            }
+
+            var newest = commentRows
                 .Select(row => new { Row = row, Id = ParseId(row.Id) })
+                .Where(row => row.Id > 0)
                 .OrderBy(row => row.Id)
                 .ToList();
             if (newest.Count == 0)
@@ -154,9 +188,27 @@ public sealed class JiraDoneCommentService
             }
 
             var lastSeen = await ReadCursorAsync(issue.Key);
-            var incoming = newest.Where(row => row.Id > lastSeen).Select(row => row.Row).ToList();
-            await WriteCursorAsync(issue.Key, newest[^1].Id);
-            if (lastSeen == 0 || incoming.Count == 0)
+            var maxId = newest[^1].Id;
+            List<JiraCommentItem> incoming;
+            if (lastSeen == 0)
+            {
+                var cutoff = DateTime.UtcNow.AddDays(-7);
+                incoming = newest
+                    .Where(row => IsRecent(row.Row, cutoff))
+                    .Select(row => row.Row)
+                    .ToList();
+            }
+            else if (maxId <= lastSeen)
+            {
+                continue;
+            }
+            else
+            {
+                incoming = newest.Where(row => row.Id > lastSeen).Select(row => row.Row).ToList();
+            }
+
+            await WriteCursorAsync(issue.Key, Math.Max(lastSeen, maxId));
+            if (incoming.Count == 0)
             {
                 continue;
             }
@@ -267,8 +319,22 @@ public sealed class JiraDoneCommentService
             return true;
         }
 
+        if (await IsActivelyFocusedAsync(task.Id))
+        {
+            return false;
+        }
+
         await _tasks.UpdateStatusAsync(task.Id, new UpdateTaskStatusRequest { Status = "Done" });
         return true;
+    }
+
+    private async Task<bool> IsActivelyFocusedAsync(int taskId)
+    {
+        using var connection = _factory.Create();
+        var active = await connection.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM WorkFocus WHERE TaskId = @TaskId AND Active = 1",
+            new { TaskId = taskId });
+        return active > 0;
     }
 
     private static string CursorKey(string key) => "JiraComment." + key.ToUpperInvariant();
@@ -282,6 +348,16 @@ public sealed class JiraDoneCommentService
         }
 
         return (comment.AuthorName ?? string.Empty).Trim().Equals("Reza Hakimi", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsRecent(JiraCommentItem comment, DateTime cutoffUtc)
+    {
+        if (!DateTime.TryParse(comment.Created, out var created))
+        {
+            return false;
+        }
+
+        return created.ToUniversalTime() >= cutoffUtc;
     }
 
     private static long ParseId(string? raw) =>

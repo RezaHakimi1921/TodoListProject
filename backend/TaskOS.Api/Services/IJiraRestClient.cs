@@ -119,6 +119,8 @@ public interface IJiraRestClient
     Task<string?> AddWorklogAsync(string jiraKey, int minutes, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JiraWorklogItem>> ListWorklogsAsync(string jiraKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JiraIssueRef>> ListUnassignedProductSupportAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<JiraIssueRef>> ListRecentOpenProductSupportAsync(CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<JiraCommentItem>> ListLatestCommentsAsync(string jiraKey, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JiraIssueComments>> ListRecentlyUpdatedProductSupportAsync(CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JiraIssueComments>> SearchIssueCommentsAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<JiraIssueState>> SearchIssueStatesAsync(IReadOnlyList<string> keys, CancellationToken cancellationToken = default);

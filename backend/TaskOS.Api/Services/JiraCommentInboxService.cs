@@ -7,12 +7,10 @@ namespace TaskOS.Api.Services;
 public sealed class JiraCommentInboxService : IJiraCommentInboxService
 {
     private readonly IJiraCommentInboxRepository _inbox;
-    private readonly IPushNotificationService _push;
 
-    public JiraCommentInboxService(IJiraCommentInboxRepository inbox, IPushNotificationService push)
+    public JiraCommentInboxService(IJiraCommentInboxRepository inbox)
     {
         _inbox = inbox;
-        _push = push;
     }
 
     public async Task<NotificationSummaryDto> ListAsync(bool unreadOnly)
@@ -41,7 +39,10 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
         string createdAt,
         bool sendPush = true)
     {
-        var inserted = await _inbox.InsertIfNewAsync(new JiraCommentInboxEntry
+        // Push is owned solely by PushInboxRelayHostedService — do not SafePush here
+        // or the phone gets every inbox row twice (insert + relay).
+        _ = sendPush;
+        return await _inbox.InsertIfNewAsync(new JiraCommentInboxEntry
         {
             TaskId = taskId,
             JiraKey = jiraKey.Trim().ToUpperInvariant(),
@@ -51,19 +52,12 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
             CreatedAt = string.IsNullOrWhiteSpace(createdAt) ? TaskMapping.Now() : createdAt.Trim(),
             ReceivedAt = TaskMapping.Now()
         });
-        if (inserted && sendPush)
-        {
-            var who = string.IsNullOrWhiteSpace(authorName) ? "کسی" : authorName.Trim();
-            await SafePush($"{who} روی {jiraKey.Trim().ToUpperInvariant()}", TrimBody(body), $"/tasks/{taskId}");
-        }
-
-        return inserted;
     }
 
     public async Task<bool> AddNewTaskAsync(int taskId, string jiraKey, string title, string createdAt)
     {
         var key = jiraKey.Trim().ToUpperInvariant();
-        var inserted = await _inbox.InsertIfNewAsync(new JiraCommentInboxEntry
+        return await _inbox.InsertIfNewAsync(new JiraCommentInboxEntry
         {
             TaskId = taskId,
             JiraKey = key,
@@ -73,12 +67,6 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
             CreatedAt = string.IsNullOrWhiteSpace(createdAt) ? TaskMapping.Now() : createdAt.Trim(),
             ReceivedAt = TaskMapping.Now()
         });
-        if (inserted)
-        {
-            await SafePush("تسک جدید جیرا", string.IsNullOrWhiteSpace(title) ? key : title.Trim(), $"/tasks/{taskId}");
-        }
-
-        return inserted;
     }
 
     public Task SeedRecentNewTasksAsync()
@@ -127,18 +115,6 @@ public sealed class JiraCommentInboxService : IJiraCommentInboxService
 
     private static bool IsNewTask(string? commentId) =>
         (commentId ?? string.Empty).StartsWith("new-task:", StringComparison.OrdinalIgnoreCase);
-
-    private async Task SafePush(string title, string body, string url)
-    {
-        try
-        {
-            await _push.SendAsync(title, body, url);
-        }
-        catch
-        {
-            // Phone push must not break inbox sync.
-        }
-    }
 
     private static string TrimBody(string? body)
     {

@@ -21,6 +21,8 @@ public sealed class DatabaseInitializer
         ("Task", "Pinned", "INTEGER NOT NULL DEFAULT 0"),
         ("TaskJira", "AssigneeName", "TEXT NULL"),
         ("TaskJira", "AssigneeDisplay", "TEXT NULL"),
+        ("AppUser", "NtfyTopic", "TEXT NULL"),
+        ("AppUser", "MustChangePassword", "INTEGER NOT NULL DEFAULT 0"),
         ("Problem", "Reality", "TEXT NULL"),
         ("Problem", "ExpectedBehavior", "TEXT NULL"),
         ("Problem", "ActualBehavior", "TEXT NULL"),
@@ -80,6 +82,8 @@ public sealed class DatabaseInitializer
             EnsureColumn(connection, table, column, type);
         }
 
+        EnsureRezaNtfyTopic(connection);
+
         EnsureWorkLogAllowsBreak(connection);
         EnsureTaskJira(connection);
         EnsureJiraCommentInbox(connection);
@@ -105,6 +109,16 @@ public sealed class DatabaseInitializer
 
     private static void EnsureColumn(SqliteConnection connection, string table, string column, string type)
     {
+        using (var exists = connection.CreateCommand())
+        {
+            exists.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $table";
+            exists.Parameters.AddWithValue("$table", table);
+            if (Convert.ToInt32(exists.ExecuteScalar()) == 0)
+            {
+                return;
+            }
+        }
+
         using var check = connection.CreateCommand();
         check.CommandText = $"PRAGMA table_info({table})";
         using var reader = check.ExecuteReader();
@@ -120,6 +134,29 @@ public sealed class DatabaseInitializer
         using var alter = connection.CreateCommand();
         alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {type}";
         alter.ExecuteNonQuery();
+    }
+
+    private static void EnsureRezaNtfyTopic(SqliteConnection connection)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            UPDATE AppUser
+            SET NtfyTopic = (SELECT Value FROM AppSettings WHERE Key = 'NtfyTopic')
+            WHERE lower(Username) = 'reza'
+              AND (NtfyTopic IS NULL OR trim(NtfyTopic) = '')
+              AND EXISTS (
+                    SELECT 1 FROM AppSettings
+                    WHERE Key = 'NtfyTopic' AND length(trim(ifnull(Value, ''))) > 0
+              )
+            """;
+        try
+        {
+            command.ExecuteNonQuery();
+        }
+        catch (SqliteException)
+        {
+            // AppUser is created by auth on older databases; ignore if it is not there yet.
+        }
     }
 
     private static void EnsureWorkLogAllowsBreak(SqliteConnection connection)

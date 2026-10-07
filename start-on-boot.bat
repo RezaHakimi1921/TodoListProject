@@ -1,11 +1,11 @@
 @echo off
 chcp 65001 >nul
 setlocal
-cd /d "E:\TodoListProject"
-set "API_DIR=E:\TodoListProject\backend\TaskOS.Api"
-set "API_EXE=E:\TodoListProject\backend\TaskOS.Api\bin\Debug\net9.0-windows10.0.19041.0\TaskOS.Api.exe"
-set "PUSH_EXE=E:\TodoListProject\backend\TaskOS.Api\bin\push\TaskOS.Api.exe"
-set "UI_DIR=E:\TodoListProject\frontend"
+cd /d "F:\Smart Drivers\TodoListProject"
+set "API_DIR=F:\Smart Drivers\TodoListProject\backend\TaskOS.Api"
+set "API_EXE=F:\Smart Drivers\TodoListProject\backend\TaskOS.Api\bin\Debug\net9.0-windows10.0.19041.0\TaskOS.Api.exe"
+set "PUSH_EXE=F:\Smart Drivers\TodoListProject\backend\TaskOS.Api\bin\push\TaskOS.Api.exe"
+set "UI_DIR=F:\Smart Drivers\TodoListProject\frontend"
 set "NODE=C:\nvm4w\nodejs"
 netstat -ano | findstr ":5088" | findstr LISTENING >nul
 if not errorlevel 1 goto push
